@@ -458,7 +458,7 @@ class InceptionI3d(snt.AbstractModule):
 
     end_point = 'Logits'
     with tf.variable_scope(end_point):
-      net = tf.nn.avg_pool3d(net, ksize=[1, 2, 7, 7, 1],
+      net = tf.nn.avg_pool3d(net, ksize=[1, 2, 7, 7, 1], #[1, 2, 7, 7, 1],
                              strides=[1, 1, 1, 1, 1], padding=snt.VALID)
       net = tf.nn.dropout(net, dropout_keep_prob)
       logits = Unit3D(output_channels=self._num_classes,
@@ -468,7 +468,7 @@ class InceptionI3d(snt.AbstractModule):
                       use_bias=True,
                       name='Conv3d_0c_1x1')(net, is_training=is_training)
       if self._spatial_squeeze:
-        logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
+          logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
     averaged_logits = tf.reduce_mean(logits, axis=1)
     end_points[end_point] = averaged_logits
     if self._final_endpoint == end_point: return averaged_logits, end_points

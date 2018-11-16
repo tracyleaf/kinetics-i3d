@@ -1,0 +1,27 @@
+import cv2
+import numpy as np
+
+cap = cv2.VideoCapture('v_BabyCrawling_g06_c05.avi') #'24881317_23_part_6.mp4'
+frameCount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+frameWidth = 224 #int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)/4)
+frameHeight = 224 #int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)/4)
+frameCount = 79
+
+buf = np.empty((1, frameCount, frameHeight, frameWidth, 3), np.dtype('uint8'))
+
+fc = 0
+ret = True
+
+while (fc < frameCount and ret):
+    ret, frame = cap.read()
+    buf[0][fc] = cv2.resize(frame,(frameWidth, frameHeight))# cap.read()
+    fc += 1
+
+cap.release()
+np.save('v_BabyCrawling_g06_c05',buf) #24881317_23_part_6_rgb
+print(buf.shape)
+cv2.namedWindow('frame 10')
+cv2.imshow('frame 10', buf[0][9])
+
+cv2.waitKey(0)
+

@@ -16,11 +16,14 @@ import tensorflow as tf
 import numpy as np
 
 
-DATA_DIR = './tmp/HMDB/videos'
-SAVE_DIR = './tmp/HMDB/data/flow'
+DATA_DIR = './video'#'./tmp/HMDB/videos'
+SAVE_DIR = './data/flow' #'./tmp/HMDB/data/flow'
 
 _EXT = ['.avi', '.mp4']
 _IMAGE_SIZE = 224
+frameWidth = 224 #480
+frameHeight = 224 #640
+framenum = 79
 _CLASS_NAMES = 'class_names.txt'
 
 FLAGS = flags.FLAGS
@@ -28,7 +31,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('data_dir', DATA_DIR, 'directory containing data.')
 flags.DEFINE_string('save_to', SAVE_DIR, 'where to save flow data.')
 flags.DEFINE_string('name', 'HMDB', 'dataset name.')
-flags.DEFINE_integer('num_threads', 32, 'number of threads.')
+flags.DEFINE_integer('num_threads', 1, 'number of threads.') #32
 
 
 def _video_length(video_path):
@@ -67,7 +70,7 @@ def compute_TVL1(video_path):
   prev = cv2.resize(prev, (_IMAGE_SIZE, _IMAGE_SIZE))
   flow = []
   vid_len = _video_length(video_path)
-  for _ in range(vid_len - 2):
+  for _ in range(framenum): # vid_len - 2
     ret, frame2 = cap.read()
     curr = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
     curr = cv2.resize(curr, (_IMAGE_SIZE, _IMAGE_SIZE))
@@ -83,6 +86,9 @@ def compute_TVL1(video_path):
     prev = curr
   cap.release()
   flow = np.array(flow)
+  # flow = flow[None,:] #ye
+  # flow = flow.reshape(1,framenum,_IMAGE_SIZE, _IMAGE_SIZE, 2)
+  print(flow.shape)
   return flow
 
 def _process_video_files(thread_index, filenames, save_to):
@@ -96,11 +102,13 @@ def _process_video_files(thread_index, filenames, save_to):
     sys.stdout.flush()
 
 def _process_dataset():
-  filenames = [filename 
+  filenames = [FLAGS.data_dir + "//" + class_fold + "//" + filename #filename
                for class_fold in 
-                 tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*')) 
+                 #tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*'))
+                  os.listdir(FLAGS.data_dir)
                  for filename in 
-                   tf.gfile.Glob(os.path.join(class_fold, '*'))
+                   # tf.gfile.Glob(os.path.join(class_fold, '*'))
+                    os.listdir(FLAGS.data_dir + "//" + class_fold)
               ]
   filename_chunk = np.array_split(filenames, FLAGS.num_threads)
   threads = []
@@ -110,7 +118,7 @@ def _process_dataset():
 
   # Launch a thread for each batch.
   print("Launching %s threads." %  FLAGS.num_threads)
-  for thread_index in xrange(FLAGS.num_threads):
+  for thread_index in range(FLAGS.num_threads):
     args = (thread_index, filename_chunk[thread_index], FLAGS.save_to)
     t = threading.Thread(target=_process_video_files, args=args)
     t.start()

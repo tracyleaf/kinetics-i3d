@@ -24,11 +24,15 @@ import tensorflow as tf
 import i3d
 
 _IMAGE_SIZE = 224
+frameHeight = 224#480
+frameWidth = 224#640
 
 _SAMPLE_VIDEO_FRAMES = 79
 _SAMPLE_PATHS = {
-    'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
-    'flow': 'data/v_CricketShot_g04_c01_flow.npy',
+    # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
+   'rgb':  'v_BabyCrawling_g06_c05.npy', #'./24881317_23_part_6_rgb.npy',
+   'flow': 'preprocess/data/flow/v_BabyCrawling_g06_c05.npy',
+    # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
 }
 
 _CHECKPOINT_PATHS = {
@@ -70,7 +74,7 @@ def main(unused_argv):
     # RGB input has 3 channels.
     rgb_input = tf.placeholder(
         tf.float32,
-        shape=(1, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 3))
+        shape=(1, _SAMPLE_VIDEO_FRAMES, frameHeight, frameWidth, 3)) #_IMAGE_SIZE
 
 
     with tf.variable_scope('RGB'):
@@ -95,7 +99,7 @@ def main(unused_argv):
     # Flow input has only 2 channels.
     flow_input = tf.placeholder(
         tf.float32,
-        shape=(1, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 2))
+        shape=(1, _SAMPLE_VIDEO_FRAMES, frameHeight, frameWidth, 2))
     with tf.variable_scope('Flow'):
       flow_model = i3d.InceptionI3d(
           NUM_CLASSES, spatial_squeeze=True, final_endpoint='Logits')
@@ -135,6 +139,8 @@ def main(unused_argv):
       tf.logging.info('Flow checkpoint restored')
       flow_sample = np.load(_SAMPLE_PATHS['flow'])
       tf.logging.info('Flow data loaded, shape=%s', str(flow_sample.shape))
+      # flow_sample = flow_sample[None,:] #ye
+      flow_sample = flow_sample.reshape(1, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 2)
       feed_dict[flow_input] = flow_sample
 
     out_logits, out_predictions = sess.run(
