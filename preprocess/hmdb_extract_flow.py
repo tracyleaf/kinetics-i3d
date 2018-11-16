@@ -23,7 +23,7 @@ _EXT = ['.avi', '.mp4']
 _IMAGE_SIZE = 224
 frameWidth = 224 #480
 frameHeight = 224 #640
-framenum = 79
+framenum = 30
 _CLASS_NAMES = 'class_names.txt'
 
 FLAGS = flags.FLAGS
@@ -87,7 +87,7 @@ def compute_TVL1(video_path):
   cap.release()
   flow = np.array(flow)
   # flow = flow[None,:] #ye
-  # flow = flow.reshape(1,framenum,_IMAGE_SIZE, _IMAGE_SIZE, 2)
+  flow = flow.reshape(1,framenum,_IMAGE_SIZE, _IMAGE_SIZE, 2)
   print(flow.shape)
   return flow
 

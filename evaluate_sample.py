@@ -27,11 +27,11 @@ _IMAGE_SIZE = 224
 frameHeight = 224#480
 frameWidth = 224#640
 
-_SAMPLE_VIDEO_FRAMES = 79
+_SAMPLE_VIDEO_FRAMES = 30
 _SAMPLE_PATHS = {
     # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
-   'rgb':  'v_BabyCrawling_g06_c05.npy', #'./24881317_23_part_6_rgb.npy',
-   'flow': 'preprocess/data/flow/v_BabyCrawling_g06_c05.npy',
+   'rgb':  'v_Biking_g06_c02.npy', #'./24881317_23_part_6_rgb.npy',
+   'flow': 'preprocess/data/flow/v_Biking_g06_c02.npy',#v_BabyCrawling_g06_c05.npy',
     # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
 }
 
@@ -58,7 +58,7 @@ def main(unused_argv):
 
   imagenet_pretrained = FLAGS.imagenet_pretrained
 
-  NUM_CLASSES = 400
+  NUM_CLASSES = 400 #400
   if eval_type == 'rgb600':
     NUM_CLASSES = 600
 
