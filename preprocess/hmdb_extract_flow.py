@@ -9,29 +9,26 @@ import os
 import sys
 import cv2
 import threading
-
-
-
 import tensorflow as tf
 import numpy as np
 
-
-DATA_DIR = './video'#'./tmp/HMDB/videos'
-SAVE_DIR = './data/flow' #'./tmp/HMDB/data/flow'
+train_or_test = 'test'
+DATA_DIR = 'E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/' #'./video'#'./tmp/HMDB/videos'
+SAVE_DIR = './data/flow/' #'./tmp/HMDB/data/flow'
 
 _EXT = ['.avi', '.mp4']
 _IMAGE_SIZE = 224
 frameWidth = 224 #480
 frameHeight = 224 #640
-framenum = 30
-_CLASS_NAMES = 'class_names.txt'
+framenum = 15
+_CLASS_NAMES = 'label_kugou.txt'
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('data_dir', DATA_DIR, 'directory containing data.')
 flags.DEFINE_string('save_to', SAVE_DIR, 'where to save flow data.')
 flags.DEFINE_string('name', 'HMDB', 'dataset name.')
-flags.DEFINE_integer('num_threads', 1, 'number of threads.') #32
+flags.DEFINE_integer('num_threads', 16, 'number of threads.') #32
 
 
 def _video_length(video_path):
@@ -96,19 +93,21 @@ def _process_video_files(thread_index, filenames, save_to):
     flow = compute_TVL1(filename)
     fullname, _ = os.path.splitext(filename)
     split_name = fullname.split('/')
-    save_name = os.path.join(save_to, split_name[-2], split_name[-1] + '.npy')
+    # save_name = os.path.join(save_to, split_name[-2], split_name[-1] + '.npy')
+    save_name = os.path.join(save_to, split_name[-5], split_name[-3], split_name[-1] + '.npy') #'./data/flow/00\\train\\125869795_4676_part_0.npy'
     np.save(save_name, flow)
     print("%s [thread %d]: %s done." % (datetime.now(), thread_index, filename))
     sys.stdout.flush()
 
 def _process_dataset():
-  filenames = [FLAGS.data_dir + "//" + class_fold + "//" + filename #filename
+  filenames = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//"+ filename #filename
                for class_fold in 
                  #tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*'))
                   os.listdir(FLAGS.data_dir)
                  for filename in 
                    # tf.gfile.Glob(os.path.join(class_fold, '*'))
-                    os.listdir(FLAGS.data_dir + "//" + class_fold)
+                   #  os.listdir(FLAGS.data_dir + "//" + class_fold）
+                    os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
               ]
   filename_chunk = np.array_split(filenames, FLAGS.num_threads)
   threads = []
@@ -133,13 +132,20 @@ def _process_dataset():
 def main(unused_argv):
   if not tf.gfile.IsDirectory(FLAGS.save_to):
     tf.gfile.MakeDirs(FLAGS.save_to)
-    f = open(_CLASS_NAMES)
-    classes = [cls.strip() for cls in f.readlines()]
+    f = open(_CLASS_NAMES, 'r', encoding= 'utf-8')
+    # classes = [cls.strip() for cls in f.readlines()]
+    classes = [cls[:2] for cls in f.readlines() if cls[0] != '\n' ]
     for cls in classes:
-        tf.gfile.MakeDirs(os.path.join(FLAGS.save_to, cls))
+        tf.gfile.MakeDirs(os.path.join(FLAGS.save_to, cls + '//' + train_or_test))
+  if train_or_test == 'test':
+    f = open(_CLASS_NAMES, 'r', encoding='utf-8')
+    # classes = [cls.strip() for cls in f.readlines()]
+    classes = [cls[:2] for cls in f.readlines() if cls[0] != '\n']
+    for cls in classes:
+      if not tf.gfile.IsDirectory(os.path.join(FLAGS.save_to, cls + '//' + train_or_test)):
+        tf.gfile.MakeDirs(os.path.join(FLAGS.save_to, cls + '//' + train_or_test))
 
   _process_dataset()
-
 
 if __name__ == '__main__':
   app.run()
