@@ -52,7 +52,7 @@ class Unit3D(snt.AbstractModule):
     """Connects the module to inputs.
 
     Args:
-      inputs: Inputs to the Unit3D component.
+      inputs: Inputs to the Unit3D component .
       is_training: whether to use training mode for snt.BatchNorm (boolean).
 
     Returns:
@@ -112,8 +112,8 @@ class InceptionI3d(snt.AbstractModule):
       'Predictions',
   )
 
-  def __init__(self, num_classes= 400, spatial_squeeze=True,#400
-               final_endpoint='Logits', name='inception_i3d'):
+  def __init__(self, num_classes= 400, spatial_squeeze=True,
+               final_endpoint= 'Logits', name='inception_i3d'):
     """Initializes I3D model instance.
 
     Args:
