@@ -29,12 +29,13 @@ from math import isnan
 
 from tensorflow.python import debug as tf_debug
 import os
+import logging
 
 _IMAGE_SIZE = 224
 frameHeight = 224#480
 frameWidth = 224#640
 dropout_keep_prob = 0.8
-batch_size = 8 #32
+batch_size = 4 #32
 epoch = 200
 _LEARNING_RATE = 0.001
 n_classes = 10
@@ -47,7 +48,7 @@ _MOMENTUM = 0.9
 _SAMPLE_VIDEO_FRAMES = 15
 _SAMPLE_PATHS = {
     # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
-   'rgb': 'preprocess/data/rgb',  #'E:/dataset/instruments_video/UCF-101/',  # '24881317_23_part_6.npy', #'./24881317_23_part_6_rgb.npy',
+   'rgb': 'preprocess/data/nan',  #'E:/dataset/instruments_video/UCF-101/',  # '24881317_23_part_6.npy', #'./24881317_23_part_6_rgb.npy',
    'flow': 'preprocess/data/flow', #'E:/dataset/instruments_video/UCF-101/', #'preprocess/data/flow/24881317_23_part_6.npy',#v_BabyCrawling_g06_c05.npy',
     # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
 }
@@ -66,12 +67,12 @@ _CHECKPOINT_PATHS = {
 
 _LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
-train_path = 'preprocess/data/train_test_label/train_videoImage_list_v5.txt'
-test_path = 'preprocess/data/train_test_label/test_videoImage_list_v5.txt'
-
+train_path = 'C:/Users/aiyanye/Desktop/rgb-1.txt'# 'preprocess/data/train_test_label/train_videoImage_list_v5.txt' #train_videoImage_list_v5
+# test_path = 'preprocess/data/train_test_label/test_videoImage_list_v5.txt'
+log_dir = 'preprocess/log'
 FLAGS = tf.flags.FLAGS
 
-tf.flags.DEFINE_string('eval_type', 'flow', 'rgb, rgb600, flow, or joint')  #'joint'
+tf.flags.DEFINE_string('eval_type', 'rgb', 'rgb, rgb600, flow, or joint')  #'joint'
 tf.flags.DEFINE_boolean('imagenet_pretrained', True, '')
 
 _CHANNEL = {
@@ -112,12 +113,16 @@ def main(unused_argv):
         kinetics_classes = [x.strip().split(' ')[0] for x in f2 if x.strip() != ''] #['00', '01', '02', '03', '04', '05', '06', '07', '08', '09']
         f2.close()
 
+
+    logging.basicConfig(level=logging.INFO, filename=os.path.join(log_dir, 'log.txt'),
+                    filemode='w', format='%(message)s')
+
     trainpathlist = split_data(train_path) #, labels_one_hot_list
-    testpathlist = split_data(train_path)
+    testpathlist = split_data(train_path)###
     print(len(trainpathlist))
     train_info_tensor = tf.constant(trainpathlist)
     test_info_tensor = tf.constant(testpathlist)
-    train_info_dataset = tf.data.Dataset.from_tensor_slices(train_info_tensor).shuffle(len(trainpathlist))
+    train_info_dataset = tf.data.Dataset.from_tensor_slices(train_info_tensor)#.shuffle(len(trainpathlist))
     train_dataset = train_info_dataset.map(lambda x: _get_data_label_from_info(x,eval_type), num_parallel_calls=_NUM_PARALLEL_CALLS)
 
     train_dataset = train_dataset.repeat().batch(batch_size)
@@ -156,41 +161,40 @@ def main(unused_argv):
         with tf.variable_scope('RGB'):
             rgb_model = i3d.InceptionI3d(
               NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Logits') #'Logits'
-          # rgb_logits, _ = rgb_model(
-          #     rgb_input, is_training=False, dropout_keep_prob=1.0)
-            rgb_mix, _ = rgb_model(
-              rgb_input, is_training=False, dropout_keep_prob=1.0)
+            rgb_logits, _ = rgb_model(
+              clip_holder, is_training=is_train_holder, dropout_keep_prob=dropout_holder)
+            rgb_logits = tf.nn.dropout(rgb_logits, dropout_holder)
 
-            netrgb = tf.nn.avg_pool3d(rgb_mix, ksize=[1, 2, 7, 7, 1],  # [1, 2, 7, 7, 1],
-                                   strides=[1, 1, 1, 1, 1], padding=snt.VALID)
-            netrgb = tf.nn.dropout(netrgb, dropout_keep_prob)
-            logits = i3d.Unit3D(output_channels=NUM_CLASSES,
-                            kernel_shape=[1, 1, 1],
-                            activation_fn=None,
-                            use_batch_norm=False,
-                            use_bias=True,
-                            name='Conv3d_0c_1x1')(netrgb, is_training=False)# True
-            # if self._spatial_squeeze:
-            rgb_logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
-            rgb_logits = tf.reduce_mean(rgb_logits, axis=1)
 
-        rgb_variable_map = {}
-        for variable in tf.global_variables(): #<tf.Variable 'RGB/inception_i3d/Conv3d_1a_7x7/batch_norm/moving_mean:0' shape=(1, 1, 1, 1, 64) dtype=float32_ref>
+        # rgb_variable_map = {}
+        # for variable in tf.global_variables(): #<tf.Variable 'RGB/inception_i3d/Conv3d_1a_7x7/batch_norm/moving_mean:0' shape=(1, 1, 1, 1, 64) dtype=float32_ref>
+        #
+        #   if variable.name.split('/')[0] == 'RGB':
+        #     if eval_type == 'rgb600':
+        #       rgb_variable_map[variable.name.replace(':0', '')[len('RGB/inception_i3d/'):]] = variable
+        #     else:
+        #       rgb_variable_map[variable.name.replace(':0', '')] = variable #variable.name='RGB/inception_i3d/Conv3d_1a_7x7/conv_3d/w:0'
+            fc_out = tf.layers.dense(
+                rgb_logits, _CLASS_NUM['kugou'], use_bias=True)
+            # compute the top-k results for the whole batch size
+            is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)  # 最大值的索引是否相等
 
-          if variable.name.split('/')[0] == 'RGB':
-            if eval_type == 'rgb600':
-              rgb_variable_map[variable.name.replace(':0', '')[len('RGB/inception_i3d/'):]] = variable
-            else:
-              rgb_variable_map[variable.name.replace(':0', '')] = variable #variable.name='RGB/inception_i3d/Conv3d_1a_7x7/conv_3d/w:0'
-
-        rgb_saver = tf.train.Saver(var_list=rgb_variable_map, reshape=True)
+            rgb_variable_map = {}
+            for variable in tf.trainable_variables():  # tf.global_variables():
+                if eval_type == 'rgb600':
+                    rgb_variable_map[variable.name.replace(':0', '')[len('RGB/inception_i3d/'):]] = variable
+                else:
+                    if variable.name.split('/')[0] == 'RGB' and ('Adam' not in variable.name.split('/')[-1]) and (
+                        'dense' not in variable.name):  ##ye #  and variable.name.split('/')[2] != 'Logits'
+                        rgb_variable_map[variable.name.replace(':0', '')] = variable
+            rgb_saver = tf.train.Saver(var_list=rgb_variable_map, reshape=True)
 
     if eval_type in ['flow', 'joint']:
         # Flow input has only 2 channels.
         flow_input = tf.placeholder(
             tf.float32,
             shape=(None, _SAMPLE_VIDEO_FRAMES, frameHeight, frameWidth, 2)) # 1
-        with tf.variable_scope('Flow'):
+        with tf.variable_scope('rgb'):#Flow
             flow_model = i3d.InceptionI3d(
                 NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Logits') #'Logits' Mixed_5c
             flow_logits, _ = flow_model(
@@ -202,7 +206,7 @@ def main(unused_argv):
             fc_out = tf.layers.dense(
                 flow_logits, _CLASS_NUM['kugou'], use_bias=True)
             # compute the top-k results for the whole batch size
-            is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)
+            is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)#最大值的索引是否相等
 
             flow_variable_map = {}
             for variable in tf.trainable_variables(): #tf.global_variables():
@@ -229,6 +233,7 @@ def main(unused_argv):
         model_logits = flow_logits
     else:
         model_logits = rgb_logits + flow_logits
+
     # model_predictions = tf.nn.softmax(model_logits)
     # weights = {'wd2': tf.Variable(tf.truncated_normal([400, 10], stddev = 0.01))}
     # biases = {'bd2': tf.Variable(tf.truncated_normal([10], stddev = 0.01))}
@@ -236,10 +241,11 @@ def main(unused_argv):
     # model_logits = tf.nn.sigmoid(fc1)
     model_predictions = tf.nn.softmax(fc_out)
 
-    varlist = [i for i in tf.global_variables() if ('Conv3d_0c_1x1' in i.name) ] #or
+    varlist = [i for i in tf.global_variables() if ('Conv3d_0c_1x1' in i.name) or ('dense' in i.name)] #or
                                               #   ('wd2' in i.name) or ('bd2' in i.name) and ('Adam' not in i.name) and('Reshape' not in i.name)]
     # [<tf.Variable 'Flow/Conv3d_0c_1x1_ye/conv_3d/w:0' shape=(1, 1, 1, 1024, 10) dtype=float32_ref>, \
     # <tf.Variable 'Flow/Conv3d_0c_1x1_ye/conv_3d/b:0' shape=(10,) dtype=float32_ref>]
+    # varlist = tf.global_variables()
     varlist1 = [i for i in tf.global_variables() if ('Conv3d_0c_1x1' in i.name)]
     # print(varlist)
     cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits= fc_out+ 1e-10, labels=label_holder)) + 0.0001*tf.nn.l2_loss(varlist1[0])
@@ -252,8 +258,12 @@ def main(unused_argv):
     values = [_LEARNING_RATE, 0.0008, 0.0005, 0.0003, 0.0001, 5e-5]
     learning_rate = tf.train.piecewise_constant(
         global_step, boundaries, values)
-    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-08)
-    # optimizer = tf.train.MomentumOptimizer(learning_rate,_MOMENTUM)
+    # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-08)
+
+
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        optimizer = tf.train.MomentumOptimizer(learning_rate,_MOMENTUM)
     gradients = tf.gradients(cost, varlist) #optimizer.compute_gradients(cost)#
     checked_grad = []
     max_gradient_norm = 5
@@ -285,8 +295,8 @@ def main(unused_argv):
             else:
                 rgb_saver.restore(sess, _CHECKPOINT_PATHS[eval_type])
             tf.logging.info('RGB checkpoint restored')
-            rgb_sample = np.load(_SAMPLE_PATHS['rgb'])
-            tf.logging.info('RGB data loaded, shape=%s', str(rgb_sample.shape))
+            # rgb_sample = np.load(_SAMPLE_PATHS['rgb'])
+            # tf.logging.info('RGB data loaded, shape=%s', str(rgb_sample.shape))
             # feed_dict[rgb_input] = rgb_sample
 
         if eval_type in ['flow', 'joint']:
@@ -295,23 +305,22 @@ def main(unused_argv):
             else:
                 flow_saver.restore(sess, _CHECKPOINT_PATHS['flow'])
             tf.logging.info('Flow checkpoint restored')
-      # flow_sample = np.load(_SAMPLE_PATHS['flow'])
-      # tf.logging.info('Flow data loaded, shape=%s', str(flow_sample.shape))
-      # flow_sample = flow_sample[None,:] #ye
-      # flow_sample = flow_sample.reshape(1, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 2)
-      # feed_dict[flow_input] = flow_sample
 
-        count = 0
         batch_num = (int)(np.ceil(len(trainpathlist) / batch_size))
         step = 0
+        count = 0
         tmp_count = 0
-        while count < epoch* batch_num :
-            count = count + 1
+        print(" -----------------Start train-------------------")
+        logging.info(train_path)
+        while step < epoch * batch_num:
+            step += 1
             time0 = time.time()
-            print(" --------------step:", count, "----------------------")
+
             time1 = time.time()
-            _, out_logits, out_predictions, cost1, is_in_top_1 = sess.run([optimizer2,fc_out, model_predictions,cost, is_in_top_1_op],
+            _, out_logits, out_predictions, cost1, is_in_top_1, label = sess.run([optimizer2,fc_out, model_predictions,cost, is_in_top_1_op,label_holder],
                                                              feed_dict={dropout_holder: dropout_keep_prob, is_train_holder: True})
+            # print("logits max:",np.max(out_logits))
+            # print("input max:",np.max(input))
             tmp = np.sum(is_in_top_1)
             tmp_count = tmp
             # accuracy = np.mean(np.argmax(out_predictions, axis = 1) == np.argmax(batch_y, axis = 1))
@@ -319,43 +328,47 @@ def main(unused_argv):
             accuracy = tmp_count /batch_size
             print(np.argmax(out_predictions, axis = 1))
             # print(np.argmax(batch_y, axis = 1))
-            print(is_in_top_1)
+            print(label)
 
             # print("out_logits", out_logits)
             print("cost:",cost1)
             print("learning_rate:",sess.run(learning_rate))
             # print(sess.run(varlist))
-            time2 = time.time()
-            print(round(time2-time1, 2),'s, count:', count, ', step:', str(step) + '/'+ str(batch_num), ',Norm of logits: %f' % np.linalg.norm(out_logits), ", Prediction accuracy: {:.3f}".format(accuracy))
-            step += 1
-
-            if step % 5== 0:# and accuracy > _RUN_TEST_THRESH:
-                sess.run(test_init_op)
-                true_count = 0
-                # start test process
-                print(len(testpathlist))
-                for i in range(len(testpathlist)):
-                    # print(i,true_count)
-                    is_in_top_1 = sess.run(is_in_top_1_op,
-                                           feed_dict={dropout_holder: 1,
-                                                      is_train_holder: False})
-                    true_count += np.sum(is_in_top_1)
-                accuracy = true_count / len(testpathlist)
-                true_count = 0
-                # to ensure every test procedure has the same test size
-                # test_data.index_in_epoch = 0
-                print('Step%d, test accuracy: %.3f' %
-                      (step, accuracy))
-                # logging.info('Epoch%d, test accuracy: %.3f' %
-                #              (train_data.epoch_completed, accuracy))
-                # saving the best params in test set
-                # if accuracy > _SAVE_MODEL_THRESH:
-                #     if accuracy > accuracy_tmp:
-                #         accuracy_tmp = accuracy
-                #         saver2.save(sess, os.path.join(log_dir,
-                #                                        test_data.name+'_'+train_data.mode +
-                #                                        '_{:.3f}_model'.format(accuracy)), step)
-                sess.run(train_init_op)
+            duration = time.time() - time1
+            # print(round(time2-time1, 2),'s, count:', count, ', step:', str(step) + '/'+ str(batch_num), ',Norm of logits: %f' % np.linalg.norm(out_logits), ", Prediction accuracy: {:.3f}".format(accuracy))
+            print("(%.2f sec/batch) epoch:%d, step:%d/%d, loss: %-.4f, accuracy: %.3f "
+                  % (duration, count, step % batch_num, batch_num-1, cost1, accuracy))
+            logging.info("(%.2f sec/batch) epoch:%d, step:%d/%d, loss: %-.4f, accuracy: %.3f "
+                  % (duration, count, step % batch_num, batch_num-1, cost1, accuracy))
+            if step % batch_num == 0:
+                count += 1
+            # if step % 5== 0:# and accuracy > _RUN_TEST_THRESH:
+            #     sess.run(test_init_op)
+            #     true_count = 0
+            #     # start test process
+            #     print(len(testpathlist))
+            #     for i in range(len(testpathlist)):
+            #         # print(i,true_count)
+            #         is_in_top_1 = sess.run(is_in_top_1_op,
+            #                                feed_dict={dropout_holder: 1,
+            #                                           is_train_holder: False})
+            #         true_count += np.sum(is_in_top_1)
+            #     accuracy = true_count / len(testpathlist)
+            #     true_count = 0
+            #     # to ensure every test procedure has the same test size
+            #     # test_data.index_in_epoch = 0
+            #     print('Step%d, test accuracy: %.3f' %
+            #           (step, accuracy))
+            #     # logging.info('Epoch%d, test accuracy: %.3f' %
+            #     #              (train_data.epoch_completed, accuracy))
+            #     # saving the best params in test set
+            #     # if accuracy > _SAVE_MODEL_THRESH:
+            #     #     if accuracy > accuracy_tmp:
+            #     #         accuracy_tmp = accuracy
+            #     #         saver2.save(sess, os.path.join(log_dir,
+            #     #                                        test_data.name+'_'+train_data.mode +
+            #     #                                        '_{:.3f}_model'.format(accuracy)), step)
+            #     sess.run(train_init_op)
 
         #     if step%5 == 0:
         #         testdata(sess, flow_input, cost, model_logits, model_predictions, count, batch_num)
@@ -364,6 +377,7 @@ def main(unused_argv):
         # saver = tf.train.saver()
         # saver.save(sess,"./model/flow-model.ckpt")
         #    train_writer.close()
+        sess.close()
         print("Optimization Finished!")
 
 # def testdata(sess,flow_input, cost, model_logits, model_predictions, count, batch_num):
@@ -410,6 +424,8 @@ def batch2array(pathlist, rgb_or_flow):
     path = str(pathlist[0])[2:-1]
     videolabel = int(str(pathlist[1])[2:-1])
     file = pathdir + path + '.npy'
+    print(path,videolabel)
+    logging.info(path + ','+ str(videolabel))
     array = np.load(file)
     # labels_one_hot = np.asarray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     # labels_one_hot[int(videolabel)] = 1
@@ -417,6 +433,7 @@ def batch2array(pathlist, rgb_or_flow):
 
 def _get_data_label_from_info(train_info_tensor, rgb_or_flow):
     """ Wrapper for `tf.py_func`, get video clip and label from info list."""
+    print("input:", train_info_tensor)
     clip_holder,label_holder = tf.py_func(
         batch2array, [train_info_tensor, rgb_or_flow], [tf.float32, tf.int32]) #train_info_tensor里面包含input和label
     return clip_holder,label_holder
@@ -426,6 +443,7 @@ def split_data(data_info):
     train_info = list()
     for line in f.readlines():
         info = line.strip().split(',')
+        print(info[1])
         assert(info[1])
         train_info.append(info)
     f.close()
