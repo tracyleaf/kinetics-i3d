@@ -15,15 +15,16 @@ frameWidth = 224 # 224 #int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)/4)
 frameHeight = 224 #int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)/4)
 frameCount = 15
 _CLASS_NAMES = 'label_kugou.txt'
-DATA_DIR = 'E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/' #'./video'#'./tmp/HMDB/videos'
-SAVE_DIR = './data/rgb/'
-train_or_test = 'test' #main函数中也需要修改
+# abspath = os.path.abspath(sys.argv[0])
+DATA_DIR = '/data2/dataset/Video_8k_dataset/video_8k' #'E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/' #'./video'#'./tmp/HMDB/videos'
+SAVE_DIR = '/data2/ye/data/rgb/'
+train_or_test = 'train' #main函数中也需要修改
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('data_dir', DATA_DIR, 'directory containing data.')
 flags.DEFINE_string('save_to', SAVE_DIR, 'where to save flow data.')
-flags.DEFINE_integer('num_threads',2, 'number of threads.') #32
+flags.DEFINE_integer('num_threads',16, 'number of threads.') #32
 flags.DEFINE_string('train_or_test', train_or_test, 'train or test dirs')
 
 def _process_video_files(thread_index, filenames, save_to):
@@ -32,42 +33,54 @@ def _process_video_files(thread_index, filenames, save_to):
     fullname, _ = os.path.splitext(filename)
     split_name = fullname.split('/')
     # save_name = os.path.join(save_to, split_name[-2], split_name[-1] + '.npy')
-    save_name = os.path.join(save_to, split_name[-5], split_name[-3], split_name[-1] + '.npy') #'./data/flow/00\\train\\125869795_4676_part_0.npy'
+    save_name = os.path.join(save_to, split_name[-5],split_name[-3], split_name[-1] + '.npy') #'./data/flow/00\\train\\125869795_4676_part_0.npy'
     np.save(save_name, flow)
     print("%s [thread %d]: %s done." % (datetime.now(), thread_index, filename))
     sys.stdout.flush()
 
 def computeRGB(video_path):
     cap = cv2.VideoCapture(video_path)  # '24881317_23_part_6.mp4'
-    buf = np.empty((1, frameCount, frameHeight, frameWidth, 3), np.dtype('float32'))#uint8
+    buf = np.zeros((1, frameCount, frameHeight, frameWidth, 3), np.dtype('float32'))#uint8  empty
     fc = 0
+    i = 0
     ret = True
-    while (fc < frameCount and ret):
+    max_val = lambda x: max(max(x.flatten()), abs(min(x.flatten())))
+    while (fc < (frameCount+20)*5 and ret and i < frameCount):
         ret, frame = cap.read()
-        frame = cv2.resize(frame,(224, 168), None , 0, 0, cv2.INTER_LINEAR) #width,height
-        max_val = lambda x: max(max(x.flatten()), abs(min(x.flatten()))) #rescale(-1,1)
-        frame = (frame / float(max_val(frame))) * 2 -1
-        frame = cv2.copyMakeBorder(frame,28,28,0,0, cv2.BORDER_CONSTANT, value =(255,255,255))
-        buf[0][fc] = frame
+        if fc%5 == 0:
+            if max_val(frame) != 0:
+                frame = cv2.resize(frame, (224, 168), None, 0, 0, cv2.INTER_LINEAR)  # width,height
+                frame = (frame / float(max_val(frame))) * 2 -1 #rescale(-1,1)
+                # frame = (frame /255. -0.5) * 2
+                frame = cv2.copyMakeBorder(frame, 28, 28, 0, 0, cv2.BORDER_CONSTANT, value=(-1, -1, -1)) #加黑边
+                buf[0][i] = frame
+                i += 1
         fc += 1
+        # else:
+            # frame = (frame / float(max_val(frame)) + 1) * 2 -1 #加1防止分母为0，或frame = (frame /255. -0.5) * 2
     cap.release()
     return buf
-    # np.save('24881317_23_part_6',buf) #24881317_23_part_6_rgb
-# print(buf.shape)
-# cv2.namedWindow('frame 10')
-# cv2.imshow('frame 10', buf[0][9])
-# cv2.waitKey(0)
+    # np.save('24881317_23_part_6',buf)
 
 def _process_dataset():
   filenames = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//"+ filename #filename
                for class_fold in
                  #tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*'))
-                  os.listdir(FLAGS.data_dir)
+                  os.listdir(FLAGS.data_dir) if 'zip' not in class_fold
                  for filename in
                    # tf.gfile.Glob(os.path.join(class_fold, '*'))
                    #  os.listdir(FLAGS.data_dir + "//" + class_fold）
                     os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
               ]
+
+  # f2 = open('C:/Users/aiyanye/Desktop/rgb-1.txt')
+  # list2 = [i.split(',')[0] for i in f2.readlines()]
+  # # list3 = ['/07/train/718334762_302_part_6,7\n', '/09/train/481834174_18838_part_19,9\n', '/00/train/681277329_1018_part_17,0\n', '/07/train/391186958_11605_part_5,7\n', '/05/train/51034854_3215_part_7,5\n', '/07/train/955483775_1168_part_8,7\n', '/09/train/420411263_13260_part_10,9\n', '/09/train/354709921_6504_part_12,9\n', '/00/train/602221806_32176_part_13,0\n', '/00/train/697213070_51_part_14,0\n', '/07/train/718334762_302_part_18,7\n', '/00/train/125869795_4676_part_1,0\n', '/09/train/611323248_32448_part_7,9\n', '/09/train/89356062_3993_part_16,9\n', '/08/train/951669046_1122_part_9,8\n', '/06/train/791838261_735_part_6,6\n', '/00/train/396479256_11947_part_8,0']
+  # list3 = ['/07/train/718334762_302_part_6,7\n'] #'/07/train/718334762_302_part_6,7\n',
+  # list2 = [i.split(',')[0] for i in list3]
+  # filenames = [FLAGS.data_dir  + i +'.mp4' for i in list2]
+  # print(filenames)
+  # f2.close()
   filename_chunk = np.array_split(filenames, FLAGS.num_threads)
   threads = []
 
@@ -102,8 +115,22 @@ def main(unused_argv):
     for cls in classes:
       if not tf.gfile.IsDirectory(os.path.join(FLAGS.save_to, cls + '//' + train_or_test)):
         tf.gfile.MakeDirs(os.path.join(FLAGS.save_to, cls + '//' + train_or_test))
-
+  # import pdb
+  # pdb.set_trace()
   _process_dataset()
+  # buf = computeRGB('E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/09/train/356692327_6617_part_0.mp4')
+  # print(buf)
+  # print(buf.shape)
+  # i = 0
+  # for i in range(buf.shape[0]):
+  # while i<buf.shape[1]:
+  #     print('max', np.max(buf[0][i]))
+  #     print('min', np.min(buf[0][i]))
+  #     cv2.imshow('123',buf[0][i])
+  #     cv2.waitKeyEx(-1)
+  #     i +=1
+  #     print(i)
 
 if __name__ == '__main__':
   app.run()
+    # main()

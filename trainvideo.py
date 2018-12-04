@@ -30,12 +30,13 @@ from math import isnan
 from tensorflow.python import debug as tf_debug
 import os
 import logging
+import cv2
 
 _IMAGE_SIZE = 224
 frameHeight = 224#480
 frameWidth = 224#640
 dropout_keep_prob = 0.8
-batch_size = 4 #32
+batch_size = 1 #32
 epoch = 200
 _LEARNING_RATE = 0.001
 n_classes = 10
@@ -53,10 +54,6 @@ _SAMPLE_PATHS = {
     # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
 }
 
-# with tf.name_scope('input'):
-#     # x = tf.placeholder(tf.float32, [None, _SAMPLE_VIDEO_FRAMES, 224, 224, 2], name='x-input') #2
-#     y = tf.placeholder(tf.float32, [None, n_classes], name='y-input') #[None, n_classes]
-
 _CHECKPOINT_PATHS = {
     'rgb': 'data/checkpoints/rgb_scratch/model.ckpt',
     'rgb600': 'data/checkpoints/rgb_scratch_kin600/model.ckpt',
@@ -67,7 +64,7 @@ _CHECKPOINT_PATHS = {
 
 _LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
-train_path = 'C:/Users/aiyanye/Desktop/rgb-1.txt'# 'preprocess/data/train_test_label/train_videoImage_list_v5.txt' #train_videoImage_list_v5
+train_path = 'C:/Users/aiyanye/Desktop/rgb-5.txt'# 'preprocess/data/train_test_label/train_videoImage_list_v5.txt' #train_videoImage_list_v5
 # test_path = 'preprocess/data/train_test_label/test_videoImage_list_v5.txt'
 log_dir = 'preprocess/log'
 FLAGS = tf.flags.FLAGS
@@ -115,10 +112,10 @@ def main(unused_argv):
 
 
     logging.basicConfig(level=logging.INFO, filename=os.path.join(log_dir, 'log.txt'),
-                    filemode='w', format='%(message)s')
+                    filemode='a', format='%(message)s')
 
-    trainpathlist = split_data(train_path) #, labels_one_hot_list
-    testpathlist = split_data(train_path)###
+    trainpathlist = split_data(train_path)
+    testpathlist = split_data(train_path)
     print(len(trainpathlist))
     train_info_tensor = tf.constant(trainpathlist)
     test_info_tensor = tf.constant(testpathlist)
@@ -163,6 +160,7 @@ def main(unused_argv):
               NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Logits') #'Logits'
             rgb_logits, _ = rgb_model(
               clip_holder, is_training=is_train_holder, dropout_keep_prob=dropout_holder)
+            # rbg_logits = tf.map_fn(lambda x: x - max(x),rgb_logits)
             rgb_logits = tf.nn.dropout(rgb_logits, dropout_holder)
 
 
@@ -248,7 +246,7 @@ def main(unused_argv):
     # varlist = tf.global_variables()
     varlist1 = [i for i in tf.global_variables() if ('Conv3d_0c_1x1' in i.name)]
     # print(varlist)
-    cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits= fc_out+ 1e-10, labels=label_holder)) + 0.0001*tf.nn.l2_loss(varlist1[0])
+    cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits= fc_out+ 1e-10, labels=label_holder)) #+ 0.0001*tf.nn.l2_loss(varlist1[0])
     global_step = tf.Variable(0, trainable=False)#softmax_cross_entropy_with_logits  model_logits
     # learning_rate = tf.train.exponential_decay(0.001, global_step, 100, 0.95, staircase= True) #100000
     # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate,epsilon=1e-08).minimize(cost, var_list = varlist, global_step = step) #  AdamOptimizer
@@ -260,10 +258,10 @@ def main(unused_argv):
         global_step, boundaries, values)
     # optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-08)
 
-
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
-        optimizer = tf.train.MomentumOptimizer(learning_rate,_MOMENTUM)
+        # optimizer = tf.train.MomentumOptimizer(learning_rate,_MOMENTUM)
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-08)
     gradients = tf.gradients(cost, varlist) #optimizer.compute_gradients(cost)#
     checked_grad = []
     max_gradient_norm = 5
@@ -310,14 +308,14 @@ def main(unused_argv):
         step = 0
         count = 0
         tmp_count = 0
-        print(" -----------------Start train-------------------")
+        logging.info(" ----------------------------Start train----------------------------------")
         logging.info(train_path)
         while step < epoch * batch_num:
             step += 1
             time0 = time.time()
 
             time1 = time.time()
-            _, out_logits, out_predictions, cost1, is_in_top_1, label = sess.run([optimizer2,fc_out, model_predictions,cost, is_in_top_1_op,label_holder],
+            _, out_logits, out_predictions, cost1, is_in_top_1, input, label  = sess.run([optimizer2,fc_out, model_predictions,cost, is_in_top_1_op, clip_holder, label_holder],
                                                              feed_dict={dropout_holder: dropout_keep_prob, is_train_holder: True})
             # print("logits max:",np.max(out_logits))
             # print("input max:",np.max(input))
@@ -329,15 +327,20 @@ def main(unused_argv):
             print(np.argmax(out_predictions, axis = 1))
             # print(np.argmax(batch_y, axis = 1))
             print(label)
-
-            # print("out_logits", out_logits)
-            print("cost:",cost1)
+            logging.info(label)
             print("learning_rate:",sess.run(learning_rate))
-            # print(sess.run(varlist))
             duration = time.time() - time1
-            # print(round(time2-time1, 2),'s, count:', count, ', step:', str(step) + '/'+ str(batch_num), ',Norm of logits: %f' % np.linalg.norm(out_logits), ", Prediction accuracy: {:.3f}".format(accuracy))
+            print("logits:", out_logits)
+            logging.info(out_logits)
+            logging.info(input)
+            for i in range(input.shape[0]):
+                for j in np.arange(0,input.shape[1],5):
+                    cv2.imshow('label_'+ str(label[i])+"frame_"+ str(j), input[i][j])
+                    cv2.waitKey(0)
+
             print("(%.2f sec/batch) epoch:%d, step:%d/%d, loss: %-.4f, accuracy: %.3f "
                   % (duration, count, step % batch_num, batch_num-1, cost1, accuracy))
+            print("--------end----------")
             logging.info("(%.2f sec/batch) epoch:%d, step:%d/%d, loss: %-.4f, accuracy: %.3f "
                   % (duration, count, step % batch_num, batch_num-1, cost1, accuracy))
             if step % batch_num == 0:
@@ -427,23 +430,26 @@ def batch2array(pathlist, rgb_or_flow):
     print(path,videolabel)
     logging.info(path + ','+ str(videolabel))
     array = np.load(file)
+    # for i in range(array.shape[1]):
+    # # print(array.shape) #(1, 15, 224, 224, 3)
+    # # print(array[0][i])
+    #     cv2.imshow("path", array[0][i])
+    #     cv2.waitKey(0)
     # labels_one_hot = np.asarray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     # labels_one_hot[int(videolabel)] = 1
     return array, videolabel
 
 def _get_data_label_from_info(train_info_tensor, rgb_or_flow):
     """ Wrapper for `tf.py_func`, get video clip and label from info list."""
-    print("input:", train_info_tensor)
     clip_holder,label_holder = tf.py_func(
         batch2array, [train_info_tensor, rgb_or_flow], [tf.float32, tf.int32]) #train_info_tensor里面包含input和label
-    return clip_holder,label_holder
+    return clip_holder, label_holder
 
 def split_data(data_info):
     f = open(data_info)
     train_info = list()
     for line in f.readlines():
         info = line.strip().split(',')
-        print(info[1])
         assert(info[1])
         train_info.append(info)
     f.close()
