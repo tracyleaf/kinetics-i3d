@@ -13,15 +13,17 @@ import tensorflow as tf
 import numpy as np
 
 train_or_test = 'test'
-DATA_DIR = 'E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/' #'./video'#'./tmp/HMDB/videos'
-SAVE_DIR = './data/flow/' #'./tmp/HMDB/data/flow'
-
+DATA_DIR = '/data2/dataset/Video_8k_dataset/video_8k' #'E:/dataset/instruments_video/data2/dataset/Video_8k_dataset/video_8k'  #
+SAVE_DIR = '/data2/ye/data/flow/'#'./data/flow'#'E:/open Source/kinetics-i3d/kinetics-i3d/preprocess/data/flow' #
+train_path = '/data2/ye/instrument-detect/preprocess/video_8k_train_list_v3.txt'
+test_path = '/data2/ye/instrument-detect/preprocess/video_8k_test_list_v3.txt'
 _EXT = ['.avi', '.mp4']
 _IMAGE_SIZE = 224
 frameWidth = 224 #480
 frameHeight = 224 #640
 framenum = 15
-_CLASS_NAMES = 'label_kugou.txt'
+frame_interval = 10
+_CLASS_NAMES = 'label_kugou.txt' #'UCF101-label.txt'
 
 FLAGS = flags.FLAGS
 
@@ -48,7 +50,7 @@ def _video_length(video_path):
   if not ext in _EXT:
     raise ValueError('Extension "%s" not supported' % ext)
   cap = cv2.VideoCapture(video_path)
-  if not cap.isOpened(): 
+  if not cap.isOpened():
     raise ValueError("Could not open the file.\n{}".format(video_path))
   if cv2.__version__ >= '3.0.0':
     CAP_PROP_FRAME_COUNT = cv2.CAP_PROP_FRAME_COUNT
@@ -61,54 +63,105 @@ def compute_TVL1(video_path):
   """Compute the TV-L1 optical flow."""
   TVL1 = DualTVL1()
   cap = cv2.VideoCapture(video_path)
-
-  ret, frame1 = cap.read()
+  for i in range(frame_interval):#former 10 frames deserted
+    ret = False
+    j = 0
+    while not ret:
+      ret, frame1 = cap.read()
+      j += 1
+      if j > 10: #empty video
+        return ""
   prev = cv2.cvtColor(frame1,cv2.COLOR_BGR2GRAY)
-  prev = cv2.resize(prev, (_IMAGE_SIZE, _IMAGE_SIZE))
+  # prev = cv2.resize(prev, (_IMAGE_SIZE, _IMAGE_SIZE))
+  prev = cv2.resize(prev, (224, 168)) #
+  prev = cv2.copyMakeBorder(prev, 28, 28, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
   flow = []
   vid_len = _video_length(video_path)
-  for _ in range(framenum): # vid_len - 2
+  fc = 0
+  i = 0
+  max_val = lambda x: max(max(x.flatten()), abs(min(x.flatten())))
+  while (fc < (framenum + 20) * frame_interval and ret and i < framenum):
     ret, frame2 = cap.read()
-    curr = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-    curr = cv2.resize(curr, (_IMAGE_SIZE, _IMAGE_SIZE))
-    curr_flow = TVL1.calc(prev, curr, None)
-    assert(curr_flow.dtype == np.float32)
-    # truncate [-20, 20]
-    curr_flow[curr_flow >= 20] = 20
-    curr_flow[curr_flow <= -20] = -20
-    # scale to [-1, 1]
-    max_val = lambda x: max(max(x.flatten()), abs(min(x.flatten())))
-    curr_flow = curr_flow / max_val(curr_flow)
-    flow.append(curr_flow)
-    prev = curr
+    if fc % frame_interval == 0 and ret:
+      # cv2.imshow('frame2', frame2)
+      # cv2.waitKeyEx(-1)
+      curr = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+      # curr = cv2.resize(curr, (_IMAGE_SIZE, _IMAGE_SIZE))
+      curr = cv2.resize(curr, (224, 168))  #
+      curr = cv2.copyMakeBorder(curr, 28, 28, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+      curr_flow = TVL1.calc(prev, curr, None)
+      assert(curr_flow.dtype == np.float32)
+      # truncate [-20, 20]
+      curr_flow[curr_flow >= 20] = 20
+      curr_flow[curr_flow <= -20] = -20
+      # scale to [-1, 1]
+      if max_val(curr_flow) != 0:
+        curr_flow = curr_flow / max_val(curr_flow)
+      else:
+        curr_flow = curr_flow / 20. #devide NAN
+      # cv2.imshow(str(fc),curr)
+      # cv2.imshow('curr_flow', curr_flow)
+      # cv2.waitKeyEx(-1)
+      flow.append(curr_flow)
+      prev = curr
+      i += 1
+    fc += 1
   cap.release()
   flow = np.array(flow)
+  if flow.shape[0] < framenum:
+    return ""
   # flow = flow[None,:] #ye
   flow = flow.reshape(1,framenum,_IMAGE_SIZE, _IMAGE_SIZE, 2)
-  print(flow.shape)
+  # print(flow.shape)
   return flow
 
 def _process_video_files(thread_index, filenames, save_to):
   for filename in filenames:
     flow = compute_TVL1(filename)
+    if flow == "":
+      continue
     fullname, _ = os.path.splitext(filename)
     split_name = fullname.split('/')
     # save_name = os.path.join(save_to, split_name[-2], split_name[-1] + '.npy')
-    save_name = os.path.join(save_to, split_name[-5], split_name[-3], split_name[-1] + '.npy') #'./data/flow/00\\train\\125869795_4676_part_0.npy'
+    save_name = os.path.join(save_to, split_name[-5], split_name[-3], split_name[-1] + '.npy') # , './data/flow/00\\train\\125869795_4676_part_0.npy'
     np.save(save_name, flow)
     print("%s [thread %d]: %s done." % (datetime.now(), thread_index, filename))
     sys.stdout.flush()
 
 def _process_dataset():
-  filenames = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//"+ filename #filename
-               for class_fold in 
-                 #tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*'))
-                  os.listdir(FLAGS.data_dir)
-                 for filename in 
-                   # tf.gfile.Glob(os.path.join(class_fold, '*'))
-                   #  os.listdir(FLAGS.data_dir + "//" + class_fold）
-                    os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
+  import pdb
+  pdb.set_trace()
+  # filenames = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//"+ filename #filename
+  #              for class_fold in
+  #                #tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*'))
+  #                 os.listdir(FLAGS.data_dir) if 'zip' not in class_fold
+  #                for filename in
+  #                  # tf.gfile.Glob(os.path.join(class_fold, '*'))
+  #                   os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
+  #             ]
+  #list1 = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//"+ filename #filename
+  #             for class_fold in
+  #                os.listdir(FLAGS.data_dir) if 'zip' not in class_fold
+  #               for filename in
+  #                  os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
+  #            ]
+  f = open(test_path)
+  train_info = []
+  for line in f.readlines():
+        info = line.strip().split(',')
+        train_info.append(info[0])
+  f.close()
+  list2 = ["/" + class_fold + "/" + train_or_test + "/"+ filename
+               for class_fold in
+                  os.listdir(FLAGS.save_to) if 'zip' not in class_fold
+                 for filename in
+                    os.listdir(FLAGS.save_to + "//" + class_fold + "//" + train_or_test)
               ]
+  #filenames = [i for i in train_info if i + '.npy' not in list2]
+  filenames = [FLAGS.data_dir + '/'+i.split('/')[-3] + '/'+ i.split('/')[-2] +'/'+ i.split('/')[-1] + '.mp4' for i in train_info if i + '.npy' not in list2]
+  print(len(filenames))
+  #print(filenames)
+
   filename_chunk = np.array_split(filenames, FLAGS.num_threads)
   threads = []
 
@@ -130,22 +183,24 @@ def _process_dataset():
 
 
 def main(unused_argv):
-  if not tf.gfile.IsDirectory(FLAGS.save_to):
-    tf.gfile.MakeDirs(FLAGS.save_to)
-    f = open(_CLASS_NAMES, 'r', encoding= 'utf-8')
-    # classes = [cls.strip() for cls in f.readlines()]
-    classes = [cls[:2] for cls in f.readlines() if cls[0] != '\n' ]
-    for cls in classes:
-        tf.gfile.MakeDirs(os.path.join(FLAGS.save_to, cls + '//' + train_or_test))
-  if train_or_test == 'test':
-    f = open(_CLASS_NAMES, 'r', encoding='utf-8')
-    # classes = [cls.strip() for cls in f.readlines()]
-    classes = [cls[:2] for cls in f.readlines() if cls[0] != '\n']
-    for cls in classes:
-      if not tf.gfile.IsDirectory(os.path.join(FLAGS.save_to, cls + '//' + train_or_test)):
-        tf.gfile.MakeDirs(os.path.join(FLAGS.save_to, cls + '//' + train_or_test))
+  f = open(_CLASS_NAMES, 'r', encoding= 'utf-8')
+  classes = [cls[:2] for cls in f.readlines() if cls[0] != '\n' ] #cls[:2]
+  for cls in classes:
+    path = FLAGS.save_to + '//' + cls + '//' + train_or_test
+    if not tf.gfile.IsDirectory(path): #os.path.join(FLAGS.save_to, cls )
+        tf.gfile.MakeDirs(path)
 
   _process_dataset()
-
+  # buf = compute_TVL1('E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/09/train/356692327_6617_part_0.mp4')
+  # print(buf)
+  # print(buf.shape)
+  # i = 0
+  # while i<buf.shape[1]:
+  #     print('max', np.max(buf[0][i]))
+  #     print('min', np.min(buf[0][i]))
+  #     cv2.imshow('flow', buf[0][i])
+  #     cv2.waitKeyEx(-1)
+  #     i +=1
+  #     print(i)
 if __name__ == '__main__':
   app.run()

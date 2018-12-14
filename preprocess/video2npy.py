@@ -14,12 +14,14 @@ _IMAGE_SIZE = 224
 frameWidth = 224 # 224 #int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)/4)
 frameHeight = 224 #int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)/4)
 frameCount = 15
+frame_interval = 10
 _CLASS_NAMES = 'label_kugou.txt'
 # abspath = os.path.abspath(sys.argv[0])
-DATA_DIR = '/data2/dataset/Video_8k_dataset/video_8k' #'E:/dataset/instruments_video/kugou_mv_dataset_part_v1/CutVideo_output/' #'./video'#'./tmp/HMDB/videos'
-SAVE_DIR = '/data2/ye/data/rgb/'
-train_or_test = 'train' #main函数中也需要修改
-
+DATA_DIR = '/data2/dataset/Video_8k_dataset/video_8k' #'E:/dataset/instruments_video/Video_8k_dataset/video_8k' #
+SAVE_DIR = '/data2/ye/data/rgb/' #'./data/rgb'#
+train_or_test = 'test'
+train_path = '/data2/ye/instrument-detect/preprocess/video_8k_train_list_v3.txt'
+test_path = '/data2/ye/instrument-detect/preprocess/video_8k_test_list_v3.txt'
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('data_dir', DATA_DIR, 'directory containing data.')
@@ -33,7 +35,7 @@ def _process_video_files(thread_index, filenames, save_to):
     fullname, _ = os.path.splitext(filename)
     split_name = fullname.split('/')
     # save_name = os.path.join(save_to, split_name[-2], split_name[-1] + '.npy')
-    save_name = os.path.join(save_to, split_name[-5],split_name[-3], split_name[-1] + '.npy') #'./data/flow/00\\train\\125869795_4676_part_0.npy'
+    save_name = os.path.join(save_to, split_name[-3],split_name[-2], split_name[-1] + '.npy') #'./data/flow/00\\train\\125869795_4676_part_0.npy'
     np.save(save_name, flow)
     print("%s [thread %d]: %s done." % (datetime.now(), thread_index, filename))
     sys.stdout.flush()
@@ -45,9 +47,9 @@ def computeRGB(video_path):
     i = 0
     ret = True
     max_val = lambda x: max(max(x.flatten()), abs(min(x.flatten())))
-    while (fc < (frameCount+20)*5 and ret and i < frameCount):
+    while (fc < (frameCount+20)*frame_interval and ret and i < frameCount):
         ret, frame = cap.read()
-        if fc%5 == 0:
+        if fc% frame_interval == 0 and ret: #前10帧数据丢弃
             if max_val(frame) != 0:
                 frame = cv2.resize(frame, (224, 168), None, 0, 0, cv2.INTER_LINEAR)  # width,height
                 frame = (frame / float(max_val(frame))) * 2 -1 #rescale(-1,1)
@@ -63,16 +65,37 @@ def computeRGB(video_path):
     # np.save('24881317_23_part_6',buf)
 
 def _process_dataset():
-  filenames = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//"+ filename #filename
+  # import pdb
+  # pdb.set_trace()
+  # list1 = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//" + filename  # filename
+  #          for class_fold in
+  #          os.listdir(FLAGS.data_dir) if 'zip' not in class_fold
+  #          for filename in
+  #          os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
+  #          ]
+  # list2 = [FLAGS.data_dir + "//" + class_fold + "//" + train_or_test + "//" + filename  # filename
+  #          for class_fold in
+  #          os.listdir(FLAGS.save_to) if 'zip' not in class_fold
+  #          for filename in
+  #          os.listdir(FLAGS.save_to + "//" + class_fold + "//" + train_or_test)
+  #          ]
+  # filenames = [i for i in list1 if i[:-4] + '.npy' not in list2]
+  f = open(test_path)
+  train_info = []
+  for line in f.readlines():
+        info = line.strip().split(',')
+        train_info.append(info[0])
+  f.close()
+  list2 = ["/" + class_fold + "/" + train_or_test + "/"+ filename
                for class_fold in
-                 #tf.gfile.Glob(os.path.join(FLAGS.data_dir, '*'))
-                  os.listdir(FLAGS.data_dir) if 'zip' not in class_fold
+                  os.listdir(FLAGS.save_to) if 'zip' not in class_fold
                  for filename in
-                   # tf.gfile.Glob(os.path.join(class_fold, '*'))
-                   #  os.listdir(FLAGS.data_dir + "//" + class_fold）
-                    os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
+                    os.listdir(FLAGS.save_to + "//" + class_fold + "//" + train_or_test)
               ]
-
+  #filenames = [i for i in train_info if i + '.npy' not in list2]
+  filenames = [FLAGS.data_dir + '/'+i.split('/')[-3] + '/'+ i.split('/')[-2] +'/'+ i.split('/')[-1] + '.mp4' for i in train_info if i + '.npy' not in list2]
+  print(len(filenames))
+  # print(filenames)
   # f2 = open('C:/Users/aiyanye/Desktop/rgb-1.txt')
   # list2 = [i.split(',')[0] for i in f2.readlines()]
   # # list3 = ['/07/train/718334762_302_part_6,7\n', '/09/train/481834174_18838_part_19,9\n', '/00/train/681277329_1018_part_17,0\n', '/07/train/391186958_11605_part_5,7\n', '/05/train/51034854_3215_part_7,5\n', '/07/train/955483775_1168_part_8,7\n', '/09/train/420411263_13260_part_10,9\n', '/09/train/354709921_6504_part_12,9\n', '/00/train/602221806_32176_part_13,0\n', '/00/train/697213070_51_part_14,0\n', '/07/train/718334762_302_part_18,7\n', '/00/train/125869795_4676_part_1,0\n', '/09/train/611323248_32448_part_7,9\n', '/09/train/89356062_3993_part_16,9\n', '/08/train/951669046_1122_part_9,8\n', '/06/train/791838261_735_part_6,6\n', '/00/train/396479256_11947_part_8,0']
@@ -122,7 +145,6 @@ def main(unused_argv):
   # print(buf)
   # print(buf.shape)
   # i = 0
-  # for i in range(buf.shape[0]):
   # while i<buf.shape[1]:
   #     print('max', np.max(buf[0][i]))
   #     print('min', np.min(buf[0][i]))
