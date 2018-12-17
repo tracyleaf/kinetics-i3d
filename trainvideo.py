@@ -30,6 +30,7 @@ from math import isnan
 from tensorflow.python import debug as tf_debug
 import os
 import logging
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import cv2
 
 _IMAGE_SIZE = 224
@@ -94,7 +95,7 @@ def main(unused_argv):
 
     imagenet_pretrained = FLAGS.imagenet_pretrained
 
-    NUM_CLASSES = 512 #400
+    NUM_CLASSES = 400 #400
     if eval_type == 'rgb600':
         NUM_CLASSES = 600
 
@@ -195,8 +196,8 @@ def main(unused_argv):
             flow_model = i3d.InceptionI3d(
                 NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Mixed_5c') #'Logits' Mixed_5c
             flow_logits, _ = flow_model(
-                clip_holder, is_training=is_train_holder, dropout_keep_prob=dropout_holder)#flow_input false 1.0   False
-            flow_logits = tf.nn.dropout(flow_logits, dropout_holder)
+                clip_holder, is_training=True, dropout_keep_prob=dropout_holder)#flow_input false 1.0   False  is_train_holder
+            # flow_logits = tf.nn.dropout(flow_logits, dropout_holder)
             # flow_mix, _ = flow_model(
             #     flow_input, is_training=False, dropout_keep_prob=1.0)
             # To change 400 classes to the ucf101 or hdmb classes
@@ -206,18 +207,17 @@ def main(unused_argv):
             netflow = tf.nn.dropout(netflow, dropout_keep_prob)
             logits = i3d.Unit3D(output_channels=NUM_CLASSES,
                               kernel_shape=[1, 1, 1],
-                              activation_fn= tf.nn.relu,#None,
-                              use_batch_norm= True,#False,
+                              activation_fn= None,#tf.nn.relu,#
+                              use_batch_norm= False,#,True
                               use_bias=True,
                               name='Conv3d_0c_1x1_ye')(netflow, is_training=is_train_holder)  # True
-            # if self._spatial_squeeze:
             flow_logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
             flow_logits = tf.reduce_mean(flow_logits, axis=1)
 
-            fc_out = tf.layers.dense(
-                flow_logits, _CLASS_NUM['kugou'], use_bias=True)
+            # fc_out = tf.layers.dense(
+            #     flow_logits, _CLASS_NUM['kugou'], use_bias=True)
             # compute the top-k results for the whole batch size
-            # fc_out = flow_logits
+            fc_out = flow_logits
             is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)
 
         # flow_variable_map = {}
@@ -226,7 +226,8 @@ def main(unused_argv):
         #             'Adam' not in variable.name.split('/')[-1]) and (
         #             'dense' not in variable.name):
         #         flow_variable_map[variable.name.replace(':0', '')] = variable
-        flow_variable_map = [v for v in tf.global_variables() if ('Flow' in v.name)]
+        # flow_variable_map = [v for v in tf.global_variables() if ('Flow' in v.name)]
+        flow_variable_map = [v for v in tf.global_variables() if 'Logits_ye' not in v.name]
         flow_saver = tf.train.Saver(var_list=flow_variable_map, reshape=True)
     saver2 = tf.train.Saver(max_to_keep=_SAVER_MAX_TO_KEEP)
     if eval_type == 'rgb' or eval_type == 'rgb600':
@@ -238,9 +239,10 @@ def main(unused_argv):
 
     model_predictions = tf.nn.softmax(fc_out)
 
-    varlist = [i for i in tf.trainable_variables()]# if ('Logits_ye' in i.name) or ('dense' in i.name)]
-    varlist1 = [i for i in tf.global_variables() if ('Logits_ye' in i.name)]#Conv3d_0c_1x1
-    cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits= fc_out, labels=label_holder)) + 7e-7*tf.nn.l2_loss(varlist1[0])
+
+    varlist = [i for i in tf.trainable_variables()] #('Logits_ye' in i.name) or
+    # varlist1 = [i for i in tf.global_variables() if ('Conv3d_0c_1x1' in i.name)]#Conv3d_0c_1x1  Logits_ye
+    cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits= fc_out, labels=label_holder)) #+ 7e-7*tf.nn.l2_loss(varlist1[0])
     global_step = tf.Variable(0, trainable=False)
     # learning_rate = tf.train.exponential_decay(0.001, global_step, 100, 0.95, staircase= True) #100000
 
@@ -250,9 +252,9 @@ def main(unused_argv):
     learning_rate = tf.train.piecewise_constant(
         global_step, boundaries, values)
     # learning_rate = 0.1
-    # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    # with tf.control_dependencies(update_ops):
-    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-08).minimize(cost, var_list=varlist, global_step=global_step)#
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-08).minimize(cost, var_list=varlist, global_step=global_step)#
     # optimizer = tf.train.MomentumOptimizer(learning_rate,
     #                                            _MOMENTUM).minimize(cost, var_list=varlist, global_step=global_step)
     # max_gradient_norm = 5
@@ -311,7 +313,7 @@ def main(unused_argv):
                   % (duration, count, step % batch_num, batch_num-1,learning_rate_c, cost1, accuracy))
             logging.info("(%.2f sec/batch) epoch:%d, step:%d/%d, learning_rate:%f, loss: %-.4f, accuracy: %.3f "
                   % (duration, count, step % batch_num, batch_num-1,learning_rate_c, cost1, accuracy))
-            if step % batch_num == 0:
+            if step % batch_num == 0:#batch_num
                 accuracy = true_count / (batch_num * batch_size)
                 print('Epoch%d, train accuracy: %.3f' %
                       (count, accuracy))
@@ -319,23 +321,29 @@ def main(unused_argv):
                              (count, accuracy))
                 true_count = 0
                 test_count = 0
+                test_output = []
+                test_label = []
                 if accuracy > 0.1:
                     sess.run(test_init_op) # new iterator
                     # start test process
                     for i in range(len(testpathlist)): # test batch is 1
                         is_in_top_1,test_predictions,label = sess.run([is_in_top_1_op,model_predictions,label_holder],
                                                feed_dict={dropout_holder: 1,
-                                                          is_train_holder: False})
+                                                          is_train_holder: False })#True
                         test_count += np.sum(is_in_top_1)
-                        # test_output.append(np.argmax(test_predictions, axis=1))
-                        # test_label.append(label)
+                        test_output.append(np.argmax(test_predictions, axis=1))
+                        test_label.append(label)
                     accuracy = test_count / len(testpathlist)
                     # to ensure every test procedure has the same test size
                     # test_data.index_in_epoch = 0
-                    print('Epoch%d, test accuracy: %.3f' %
-                          (count, accuracy))
-                    logging.info('Epoch%d, test accuracy: %.3f' %
-                                 (count, accuracy))
+                    accuracy_sklearn = accuracy_score(test_label, test_output)
+                    precision = precision_score(test_label, test_output, average= 'macro')
+                    recall = recall_score(test_label, test_output, average= 'macro')
+                    F1 = f1_score(test_label, test_output, average= 'macro')
+                    print('Epoch%d, test accuracy: %.3f,accuracy_sklearn: %.3f, precision: %.3f, recall: %.3f, F1: %.3f' %
+                          (count, accuracy, accuracy_sklearn, precision, recall, F1))
+                    logging.info('Epoch%d, test accuracy: %.3f, accuracy_sklearn: %.3f, precision: %.3f, recall: %.3f, F1: %.3f' %
+                                 (count, accuracy, accuracy_sklearn, precision, recall, F1))
                     # saving the best params in test set
                     if accuracy > 0.85:
                         if accuracy > accuracy_tmp:
