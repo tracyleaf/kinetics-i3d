@@ -36,7 +36,7 @@ import cv2
 _IMAGE_SIZE = 224
 frameHeight = 224#480
 frameWidth = 224#640
-dropout_keep_prob = 0.8
+dropout_keep_prob = 0.36 #0.8
 batch_size = 16 #8
 epoch = 200
 _LEARNING_RATE = 0.01
@@ -67,7 +67,7 @@ _LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
 train_path = 'preprocess/video_8k_train_list_v3.txt'
 test_path = 'preprocess/video_8k_test_list_v3.txt'
-log_dir = 'preprocess/log'
+log_dir = 'preprocess/log-joint/'
 FLAGS = tf.flags.FLAGS
 
 tf.flags.DEFINE_string('eval_type', rgb_or_flow, 'rgb, rgb600, flow, or joint')  #'joint'
@@ -95,7 +95,7 @@ def main(unused_argv):
 
     imagenet_pretrained = FLAGS.imagenet_pretrained
 
-    NUM_CLASSES = 400 #400
+    NUM_CLASSES = 9 #400
     if eval_type == 'rgb600':
         NUM_CLASSES = 600
 
@@ -121,7 +121,7 @@ def main(unused_argv):
     print(len(testpathlist))
     train_info_tensor = tf.constant(trainpathlist)
     test_info_tensor = tf.constant(testpathlist)
-    train_info_dataset = tf.data.Dataset.from_tensor_slices(train_info_tensor).shuffle(len(trainpathlist), seed=1)
+    train_info_dataset = tf.data.Dataset.from_tensor_slices(train_info_tensor).shuffle(len(trainpathlist))
     train_dataset = train_info_dataset.map(lambda x: _get_data_label_from_info(x,eval_type), num_parallel_calls=_NUM_PARALLEL_CALLS)
 
     train_dataset = train_dataset.repeat().batch(batch_size)
@@ -129,12 +129,12 @@ def main(unused_argv):
 
     # Phase 2 Testing
     # one element in this dataset is (train_info list)
-    test_info_dataset = tf.data.Dataset.from_tensor_slices(test_info_tensor)
+    test_info_dataset = tf.data.Dataset.from_tensor_slices(test_info_tensor).shuffle(len(testpathlist))
     # one element in this dataset is (single image_postprocess, single label)
     test_dataset = test_info_dataset.map(lambda x: _get_data_label_from_info(
         x, eval_type), num_parallel_calls=_NUM_PARALLEL_CALLS)
     # one element in this dataset is (batch image_postprocess, batch label)
-    test_dataset = test_dataset.batch(1).repeat()
+    test_dataset = test_dataset.batch(batch_size).repeat()#1
     test_dataset = test_dataset.prefetch(buffer_size=_PREFETCH_BUFFER_SIZE)
 
     iterator = tf.data.Iterator.from_structure(
@@ -152,57 +152,35 @@ def main(unused_argv):
 
     if eval_type in ['rgb', 'rgb600', 'joint']:
         # RGB input has 3 channels.
-        rgb_input = tf.placeholder(
-            tf.float32,
-            shape=(None, _SAMPLE_VIDEO_FRAMES, frameHeight, frameWidth, 3)) #_1, IMAGE_SIZE
-
         with tf.variable_scope('RGB'):
             rgb_model = i3d.InceptionI3d(
-              NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Logits') #'Logits'
+              NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Mixed_5c') #'Logits'
             rgb_logits, _ = rgb_model(
-              clip_holder, is_training=is_train_holder, dropout_keep_prob=dropout_holder)
-            rgb_logits = tf.nn.dropout(rgb_logits, dropout_holder)
-
-
-        # rgb_variable_map = {}
-        # for variable in tf.global_variables(): #<tf.Variable 'RGB/inception_i3d/Conv3d_1a_7x7/batch_norm/moving_mean:0' shape=(1, 1, 1, 1, 64) dtype=float32_ref>
-        #
-        #   if variable.name.split('/')[0] == 'RGB':
-        #     if eval_type == 'rgb600':
-        #       rgb_variable_map[variable.name.replace(':0', '')[len('RGB/inception_i3d/'):]] = variable
-        #     else:
-        #       rgb_variable_map[variable.name.replace(':0', '')] = variable #variable.name='RGB/inception_i3d/Conv3d_1a_7x7/conv_3d/w:0'
-            fc_out = tf.layers.dense(
-                rgb_logits, _CLASS_NUM['kugou'], use_bias=True)
-            # compute the top-k results for the whole batch size
-            is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)
-
-            rgb_variable_map = {}
-            for variable in tf.global_variables(): #tf.trainable_variables():
-                if eval_type == 'rgb600':
-                    rgb_variable_map[variable.name.replace(':0', '')[len('RGB/inception_i3d/'):]] = variable
-                else:
-                    if variable.name.split('/')[0] == 'RGB' and ('Adam' not in variable.name.split('/')[-1]) and (
-                        'dense' not in variable.name):   # and variable.name.split('/')[2] != 'Logits'
-                        rgb_variable_map[variable.name.replace(':0', '')] = variable
+              clip_holder, is_training= True, dropout_keep_prob=dropout_holder) #is_train_holder
+            with tf.variable_scope('Logits_ye_rgb'):
+                netrgb = tf.nn.avg_pool3d(rgb_logits, ksize=[1, 2, 7, 7, 1],
+                                           strides=[1, 1, 1, 1, 1], padding=snt.VALID)
+                netrgb = tf.nn.dropout(netrgb, dropout_keep_prob)
+                logits = i3d.Unit3D(output_channels=NUM_CLASSES,
+                                    kernel_shape=[1, 1, 1],
+                                    activation_fn=None,  # tf.nn.relu,#
+                                    use_batch_norm=False,  # ,True
+                                    use_bias=True,
+                                    name='Conv3d_0c_1x1_ye_rgb')(netrgb, is_training=is_train_holder)  # True
+                rgb_logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
+                rgb_logits = tf.reduce_mean(rgb_logits, axis=1)
+            rgb_variable_map = [v for v in tf.global_variables() if 'Logits_ye_rgb' not in v.name]
             rgb_saver = tf.train.Saver(var_list=rgb_variable_map, reshape=True)
 
     if eval_type in ['flow', 'joint']:
         # Flow input has only 2 channels.
-        flow_input = tf.placeholder(
-            tf.float32,
-            shape=(None, _SAMPLE_VIDEO_FRAMES, frameHeight, frameWidth, 2)) # 1
         with tf.variable_scope('Flow'):#Flow
             flow_model = i3d.InceptionI3d(
-                NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Mixed_5c') #'Logits' Mixed_5c
+                NUM_CLASSES, spatial_squeeze=True, final_endpoint= 'Mixed_5c')
             flow_logits, _ = flow_model(
-                clip_holder, is_training=True, dropout_keep_prob=dropout_holder)#flow_input false 1.0   False  is_train_holder
-            # flow_logits = tf.nn.dropout(flow_logits, dropout_holder)
-            # flow_mix, _ = flow_model(
-            #     flow_input, is_training=False, dropout_keep_prob=1.0)
-            # To change 400 classes to the ucf101 or hdmb classes
+                clip_holder, is_training=True, dropout_keep_prob=dropout_holder)#is_train_holder
         with tf.variable_scope('Logits_ye'):
-            netflow = tf.nn.avg_pool3d(flow_logits, ksize=[1, 2, 7, 7, 1],  # [1, 2, 7, 7, 1],
+            netflow = tf.nn.avg_pool3d(flow_logits, ksize=[1, 2, 7, 7, 1],
                                      strides=[1, 1, 1, 1, 1], padding=snt.VALID)
             netflow = tf.nn.dropout(netflow, dropout_keep_prob)
             logits = i3d.Unit3D(output_channels=NUM_CLASSES,
@@ -213,34 +191,21 @@ def main(unused_argv):
                               name='Conv3d_0c_1x1_ye')(netflow, is_training=is_train_holder)  # True
             flow_logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
             flow_logits = tf.reduce_mean(flow_logits, axis=1)
-
-            # fc_out = tf.layers.dense(
-            #     flow_logits, _CLASS_NUM['kugou'], use_bias=True)
-            # compute the top-k results for the whole batch size
-            fc_out = flow_logits
-            is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)
-
-        # flow_variable_map = {}
-        # for variable in tf.global_variables():  # trainable_variables()
-        #     if variable.name.split('/')[0] == 'Flow' and ('Conv3d_0c_1x1' not in variable.name) and ('Conv3d_0c_1x1_ye' not in variable.name) and (
-        #             'Adam' not in variable.name.split('/')[-1]) and (
-        #             'dense' not in variable.name):
-        #         flow_variable_map[variable.name.replace(':0', '')] = variable
-        # flow_variable_map = [v for v in tf.global_variables() if ('Flow' in v.name)]
         flow_variable_map = [v for v in tf.global_variables() if 'Logits_ye' not in v.name]
         flow_saver = tf.train.Saver(var_list=flow_variable_map, reshape=True)
+
     saver2 = tf.train.Saver(max_to_keep=_SAVER_MAX_TO_KEEP)
-    if eval_type == 'rgb' or eval_type == 'rgb600':
-        model_logits = rgb_logits
+    if eval_type == 'rgb':
+        fc_out = rgb_logits
     elif eval_type == 'flow':
-        model_logits = flow_logits
+        fc_out = flow_logits
     else:
-        model_logits = rgb_logits + flow_logits
+        fc_out = rgb_logits + flow_logits
 
     model_predictions = tf.nn.softmax(fc_out)
+    is_in_top_1_op = tf.nn.in_top_k(fc_out, label_holder, 1)
 
-
-    varlist = [i for i in tf.trainable_variables()] #('Logits_ye' in i.name) or
+    varlist = [i for i in tf.trainable_variables()]
     # varlist1 = [i for i in tf.global_variables() if ('Conv3d_0c_1x1' in i.name)]#Conv3d_0c_1x1  Logits_ye
     cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits= fc_out, labels=label_holder)) #+ 7e-7*tf.nn.l2_loss(varlist1[0])
     global_step = tf.Variable(0, trainable=False)
@@ -298,11 +263,6 @@ def main(unused_argv):
             tmp_count = tmp
             true_count += tmp
             accuracy = tmp_count /batch_size
-            # print(np.argmax(out_logits, axis = 1))
-            # print(label)
-            # print([[clip_holder[i],label[i]] for i in range(0,batch_size)])
-            # print(out_logits)
-            # logging.info(label)
             duration = time.time() - time1
             # for i in range(input.shape[0]):
             #     for j in np.arange(0,input.shape[1],5):
@@ -323,19 +283,38 @@ def main(unused_argv):
                 test_count = 0
                 test_output = []
                 test_label = []
+                step_test = 0
                 if accuracy > 0.1:
                     sess.run(test_init_op) # new iterator
                     # start test process
-                    for i in range(len(testpathlist)): # test batch is 1
-                        is_in_top_1,test_predictions,label = sess.run([is_in_top_1_op,model_predictions,label_holder],
-                                               feed_dict={dropout_holder: 1,
-                                                          is_train_holder: False })#True
-                        test_count += np.sum(is_in_top_1)
-                        test_output.append(np.argmax(test_predictions, axis=1))
-                        test_label.append(label)
-                    accuracy = test_count / len(testpathlist)
+                    # for i in range(len(testpathlist)): # test batch is 1
+                    #     is_in_top_1,test_predictions,label = sess.run([is_in_top_1_op,model_predictions,label_holder],
+                    #                            feed_dict={dropout_holder: 1,
+                    #                                       is_train_holder: False })#True
+                    #     test_count += np.sum(is_in_top_1)
+                    #     test_output.append(np.argmax(test_predictions, axis=1))
+                    #     test_label.append(label)
+                    #  accuracy = test_count / len(testpathlist)
+                    test_batch_num = int(np.ceil(len(testpathlist)/batch_size))
+                    while step_test < test_batch_num:
+                        step_test += 1
+                        test_predictions, is_in_top_1, input, label \
+                            = sess.run([model_predictions,is_in_top_1_op, clip_holder, label_holder],
+                            feed_dict={dropout_holder: 1, is_train_holder: False})  # False
+                        test_label.extend(label)
+                        test_output.extend(np.argmax(test_predictions, axis=1))
+                        tmp = np.sum(is_in_top_1)
+                        test_count += tmp
+                    if step_test == test_batch_num:  # batch_num
+                        accuracy = test_count / (test_batch_num * batch_size)
                     # to ensure every test procedure has the same test size
                     # test_data.index_in_epoch = 0
+                    # test_predictions, is_in_top_1, input, label \
+                    #             = sess.run([model_predictions,is_in_top_1_op, clip_holder, label_holder],
+                    #         feed_dict={dropout_holder: 1, is_train_holder: False})  # False
+                    # test_label.extend(label)
+                    # test_output.extend(np.argmax(test_predictions, axis=1))
+                    # accuracy = np.sum(is_in_top_1)/batch_size
                     accuracy_sklearn = accuracy_score(test_label, test_output)
                     precision = precision_score(test_label, test_output, average= 'macro')
                     recall = recall_score(test_label, test_output, average= 'macro')
@@ -345,7 +324,7 @@ def main(unused_argv):
                     logging.info('Epoch%d, test accuracy: %.3f, accuracy_sklearn: %.3f, precision: %.3f, recall: %.3f, F1: %.3f' %
                                  (count, accuracy, accuracy_sklearn, precision, recall, F1))
                     # saving the best params in test set
-                    if accuracy > 0.85:
+                    if accuracy > 0.81:
                         if accuracy > accuracy_tmp:
                             accuracy_tmp = accuracy
                             saver2.save(sess, os.path.join(log_dir,
