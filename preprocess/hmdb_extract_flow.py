@@ -11,12 +11,13 @@ import cv2
 import threading
 import tensorflow as tf
 import numpy as np
+import time
 
 train_or_test = 'test'
-DATA_DIR = '/data2/dataset/Video_8k_dataset/video_8k' #'E:/dataset/instruments_video/data2/dataset/Video_8k_dataset/video_8k'  #
-SAVE_DIR = '/data2/ye/data/flow/'#'./data/flow'#'E:/open Source/kinetics-i3d/kinetics-i3d/preprocess/data/flow' #
-train_path = '/data2/ye/instrument-detect/preprocess/video_8k_train_list_v3.txt'
-test_path = '/data2/ye/instrument-detect/preprocess/video_8k_test_list_v3.txt'
+DATA_DIR = '/data2/dataset/Video_9k_dataset_v3/video_9k'
+SAVE_DIR = '/data2/ye/data/flow'
+train_path = '/data2/ye/instrument-detect/preprocess/video_9k_train_list_v2.txt'
+test_path = '/data2/ye/instrument-detect/preprocess/video_9k_test_list_v2.txt'
 _EXT = ['.avi', '.mp4']
 _IMAGE_SIZE = 224
 frameWidth = 224 #480
@@ -70,7 +71,7 @@ def compute_TVL1(video_path):
       ret, frame1 = cap.read()
       j += 1
       if j > 10: #empty video
-        return ""
+        return None
   prev = cv2.cvtColor(frame1,cv2.COLOR_BGR2GRAY)
   # prev = cv2.resize(prev, (_IMAGE_SIZE, _IMAGE_SIZE))
   prev = cv2.resize(prev, (224, 168)) #
@@ -81,7 +82,7 @@ def compute_TVL1(video_path):
   i = 0
   max_val = lambda x: max(max(x.flatten()), abs(min(x.flatten())))
   while (fc < (framenum + 20) * frame_interval and ret and i < framenum):
-    ret, frame2 = cap.read()
+    ret,   = cap.read()
     if fc % frame_interval == 0 and ret:
       # cv2.imshow('frame2', frame2)
       # cv2.waitKeyEx(-1)
@@ -108,8 +109,8 @@ def compute_TVL1(video_path):
     fc += 1
   cap.release()
   flow = np.array(flow)
-  if flow.shape[0] < framenum:
-    return ""
+  if flow.shape[0] < framenum:#if <15 frames break
+    return None
   # flow = flow[None,:] #ye
   flow = flow.reshape(1,framenum,_IMAGE_SIZE, _IMAGE_SIZE, 2)
   # print(flow.shape)
@@ -118,12 +119,12 @@ def compute_TVL1(video_path):
 def _process_video_files(thread_index, filenames, save_to):
   for filename in filenames:
     flow = compute_TVL1(filename)
-    if flow == "":
+    if flow is None:
       continue
     fullname, _ = os.path.splitext(filename)
     split_name = fullname.split('/')
     # save_name = os.path.join(save_to, split_name[-2], split_name[-1] + '.npy')
-    save_name = os.path.join(save_to, split_name[-5], split_name[-3], split_name[-1] + '.npy') # , './data/flow/00\\train\\125869795_4676_part_0.npy'
+    save_name = os.path.join(save_to, split_name[-3], split_name[-2], split_name[-1] + '.npy') # , './data/flow/00\\train\\125869795_4676_part_0.npy'
     np.save(save_name, flow)
     print("%s [thread %d]: %s done." % (datetime.now(), thread_index, filename))
     sys.stdout.flush()
@@ -145,7 +146,10 @@ def _process_dataset():
   #               for filename in
   #                  os.listdir(FLAGS.data_dir + "//" + class_fold + "//" + train_or_test)
   #            ]
-  f = open(test_path)
+  if train_or_test == 'train':
+    f = open(train_path)
+  if train_or_test == 'test':
+    f = open(test_path)
   train_info = []
   for line in f.readlines():
         info = line.strip().split(',')
@@ -159,9 +163,9 @@ def _process_dataset():
               ]
   #filenames = [i for i in train_info if i + '.npy' not in list2]
   filenames = [FLAGS.data_dir + '/'+i.split('/')[-3] + '/'+ i.split('/')[-2] +'/'+ i.split('/')[-1] + '.mp4' for i in train_info if i + '.npy' not in list2]
-  print(len(filenames))
+  # print(len(filenames))
   #print(filenames)
-
+  time1 = time.time()
   filename_chunk = np.array_split(filenames, FLAGS.num_threads)
   threads = []
 
@@ -180,10 +184,11 @@ def _process_dataset():
   coord.join(threads)
   print("%s: Finished processing all %d videos in data set '%s'." %
         (datetime.now(), len(filenames), FLAGS.name))
-
+  duration = time.time() - time1
+  print("Time total:%.2f, Per Video: %2f" %(duration, duration /len(filenames)))
 
 def main(unused_argv):
-  f = open(_CLASS_NAMES, 'r', encoding= 'utf-8')
+  f = open(_CLASS_NAMES, 'r')#, encoding= 'utf-8')
   classes = [cls[:2] for cls in f.readlines() if cls[0] != '\n' ] #cls[:2]
   for cls in classes:
     path = FLAGS.save_to + '//' + cls + '//' + train_or_test

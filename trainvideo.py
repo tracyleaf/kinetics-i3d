@@ -36,7 +36,7 @@ import cv2
 _IMAGE_SIZE = 224
 frameHeight = 224#480
 frameWidth = 224#640
-dropout_keep_prob = 0.36 #0.8
+dropout_keep_prob = 0.8 #0.8
 batch_size = 16 #8
 epoch = 200
 _LEARNING_RATE = 0.01
@@ -46,7 +46,7 @@ _NUM_PARALLEL_CALLS = 10
 _PREFETCH_BUFFER_SIZE = 30
 _MOMENTUM = 0.9
 rgb_or_flow = 'flow'
-_SAVER_MAX_TO_KEEP = 10
+_SAVER_MAX_TO_KEEP = 3
 _SAMPLE_VIDEO_FRAMES = 15
 _SAMPLE_PATHS = {
     # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
@@ -65,8 +65,8 @@ _CHECKPOINT_PATHS = {
 
 _LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
-train_path = 'preprocess/video_8k_train_list_v3.txt'
-test_path = 'preprocess/video_8k_test_list_v3.txt'
+train_path = 'preprocess/video_9k_train_list_v2.txt'
+test_path = 'preprocess/video_9k_test_list_v2.txt'
 log_dir = 'preprocess/log-joint/'
 FLAGS = tf.flags.FLAGS
 
@@ -85,7 +85,7 @@ _SCOPE = {
 _CLASS_NUM = {
     'ucf101': 101,
     'hmdb51': 51,
-    'kugou': 9
+    'kugou': 15
 }
 
 def main(unused_argv):
@@ -95,7 +95,7 @@ def main(unused_argv):
 
     imagenet_pretrained = FLAGS.imagenet_pretrained
 
-    NUM_CLASSES = 9 #400
+    NUM_CLASSES = 15 #400
     if eval_type == 'rgb600':
         NUM_CLASSES = 600
 
@@ -108,7 +108,7 @@ def main(unused_argv):
         f1.close()
     else:
         f2 = open(_LABEL_MAP_PATH, 'r', encoding='utf8')
-        kinetics_classes = [x.strip().split(' ')[0] for x in f2 if x.strip() != ''] #['00', '01', '02', '03', '04', '05', '06', '07', '08', '09']
+        kinetics_classes = [x.strip().split(' ')[0] for x in f2 if x.strip() != '']
         f2.close()
 
 
@@ -252,9 +252,9 @@ def main(unused_argv):
         true_count = 0
         accuracy_tmp = 0
         logging.info(train_path)
+        time1 = time.time()
         while step < epoch * batch_num:
             step += 1
-            time1 = time.time()
             _, out_logits, out_predictions, cost1, is_in_top_1, input, label, learning_rate_c  \
                 = sess.run([optimizer,fc_out, model_predictions,cost, is_in_top_1_op, clip_holder, label_holder, learning_rate],
                                                              feed_dict={dropout_holder: dropout_keep_prob, is_train_holder: True})#False
@@ -295,7 +295,7 @@ def main(unused_argv):
                     #     test_output.append(np.argmax(test_predictions, axis=1))
                     #     test_label.append(label)
                     #  accuracy = test_count / len(testpathlist)
-                    test_batch_num = int(np.ceil(len(testpathlist)/batch_size))
+                    test_batch_num = int(np.ceil(len(testpathlist)/batch_size))#最后一个batch的数目不满一个batch_size
                     while step_test < test_batch_num:
                         step_test += 1
                         test_predictions, is_in_top_1, input, label \
@@ -306,7 +306,8 @@ def main(unused_argv):
                         tmp = np.sum(is_in_top_1)
                         test_count += tmp
                     if step_test == test_batch_num:  # batch_num
-                        accuracy = test_count / (test_batch_num * batch_size)
+                        # accuracy = test_count / (test_batch_num * batch_size)
+                        accuracy = test_count /len(testpathlist)
                     # to ensure every test procedure has the same test size
                     # test_data.index_in_epoch = 0
                     # test_predictions, is_in_top_1, input, label \
@@ -324,17 +325,20 @@ def main(unused_argv):
                     logging.info('Epoch%d, test accuracy: %.3f, accuracy_sklearn: %.3f, precision: %.3f, recall: %.3f, F1: %.3f' %
                                  (count, accuracy, accuracy_sklearn, precision, recall, F1))
                     # saving the best params in test set
-                    if accuracy > 0.81:
-                        if accuracy > accuracy_tmp:
-                            accuracy_tmp = accuracy
+                    if accuracy_sklearn > 0.81:
+                        if accuracy_sklearn > accuracy_tmp:
+                            accuracy_tmp = accuracy_sklearn
                             saver2.save(sess, os.path.join(log_dir,
                                                            'kugou' + '_' + rgb_or_flow +
-                                                           '_{:.3f}_model'.format(accuracy)), step)
+                                                           '_{:.3f}_model'.format(accuracy_sklearn)), step)
                     sess.run(train_init_op)
                 count += 1
+                duration = time.time() - time1
+                print("Time total:%.2f, Step: %d" %(duration, step))
            # train_writer.close()
         sess.close()
         print("Optimization Finished!")
+
 
 def batch2array(pathlist, rgb_or_flow):
     pathdir = _SAMPLE_PATHS[rgb_or_flow.decode("utf-8")]
