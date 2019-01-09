@@ -247,7 +247,7 @@ def main(unused_argv):
         if eval_type == 'flow':
             # test_output = list(np.argmax(test_flow_logits, axis=1))
             test_output = []
-            for i in range(flowcount):
+            for i in range(len(test_flow_logits)):
                 test_output.extend(list(np.argmax(test_flow_logits[i], axis=1)))
             # resultprint(test_label_flow, test_output)
         if eval_type == 'joint':
@@ -262,7 +262,7 @@ def main(unused_argv):
                 resultprint(test_label, test_output)
         sess.close()
         duration = time.time() - time1
-        print('Optimization Finished! Time total:%.2f, Per Video: %2f' %(duration, duration/flowcount))
+        print('Optimization Finished! Time total:%.2f, Per Video: %2f' %(duration, duration/len(test_output)))
 
 def resultprint(test_label,test_output):
         print(test_label)

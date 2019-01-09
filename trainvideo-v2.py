@@ -32,6 +32,7 @@ import os
 import logging
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import cv2
+from preprocess.Video3D import get_frames2
 
 _IMAGE_SIZE = 224
 frameHeight = 224#480
@@ -45,9 +46,10 @@ flag = False
 _NUM_PARALLEL_CALLS = 10
 _PREFETCH_BUFFER_SIZE = 30
 _MOMENTUM = 0.9
-rgb_or_flow = 'flow'
+rgb_or_flow = 'rgb'
 _SAVER_MAX_TO_KEEP = 3
-_SAMPLE_VIDEO_FRAMES = 15
+_SAMPLE_VIDEO_FRAMES = 16
+DATA_DIR = '/data2/dataset/Video_9k_dataset_v3/video_9k' #'E:/dataset/instruments_video/Video_9k_dataset_v3/video_9k'#
 _SAMPLE_PATHS = {
     # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
    'rgb': '/data2/ye/data/rgb',  #'E:/dataset/instruments_video/UCF-101/',  # '24881317_23_part_6.npy', #'./24881317_23_part_6_rgb.npy',
@@ -67,7 +69,7 @@ _LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
 train_path = 'preprocess/video_9k_train_list_v2.txt'
 test_path = 'preprocess/video_9k_test_list_v2.txt'
-log_dir = 'preprocess/log-joint/'
+log_dir = 'preprocess/log-v2/'
 FLAGS = tf.flags.FLAGS
 
 tf.flags.DEFINE_string('eval_type', rgb_or_flow, 'rgb, rgb600, flow, or joint')  #'joint'
@@ -340,7 +342,6 @@ def main(unused_argv):
         sess.close()
         print("Optimization Finished!")
 
-
 def batch2array(pathlist, rgb_or_flow):
     pathdir = _SAMPLE_PATHS[rgb_or_flow.decode("utf-8")]
     path = str(pathlist[0])[2:-1]
@@ -349,10 +350,24 @@ def batch2array(pathlist, rgb_or_flow):
     array = np.load(file)
     return array, videolabel
 
+def batch2array_2(pathlist, rgb_or_flow):
+    # pathdir = _SAMPLE_PATHS[rgb_or_flow.decode("utf-8")]
+    rgb_or_flow = rgb_or_flow.decode("utf-8")
+    path = str(pathlist[0])[2:-1]
+    clip_label = (np.int64)(str(pathlist[1])[2:-1])
+    # file = pathdir + path + '.npy'
+    # array = np.load(file)
+    video_path = DATA_DIR + '/' + path + '.mp4'
+    clip_seq = get_frames2(video_path, rgb_or_flow, _SAMPLE_VIDEO_FRAMES, data_augment=True)
+    clip_seq = 2*(clip_seq/255) - 1
+    clip_seq = np.array(clip_seq, dtype='float32')
+    return clip_seq, clip_label
+
 def _get_data_label_from_info(train_info_tensor, rgb_or_flow):
     """ Wrapper for `tf.py_func`, get video clip and label from info list."""
+    # print(type(rgb_or_flow))
     clip_holder,label_holder = tf.py_func(
-        batch2array, [train_info_tensor, rgb_or_flow], [tf.float32, tf.int64]) #train_info_tensor contains input and label
+        batch2array_2, [train_info_tensor, rgb_or_flow], [tf.float32, tf.int64]) #train_info_tensor contains input and label
     return clip_holder, label_holder
 
 def split_data(data_info):
