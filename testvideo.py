@@ -1,19 +1,8 @@
-# Copyright 2017 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# ============================================================================
+# 加载数据测试，非队列方式，设置rgb_or_flow 为 'flow'或'rgb'类型
+# 输入数据为视频格式
 # ============================================================================
 # -*- coding: utf-8 -*-
-"""Loads a sample video and classifies using a trained Kinetics checkpoint."""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -51,10 +40,8 @@ testnum = 150
 _SAVER_MAX_TO_KEEP = 10
 _SAMPLE_VIDEO_FRAMES = 15
 _SAMPLE_PATHS = {
-    # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
-   'rgb': '/data2/ye/data/rgb',  #'E:/dataset/instruments_video/UCF-101/',  # '24881317_23_part_6.npy', #'./24881317_23_part_6_rgb.npy',
-   'flow': '/data2/ye/data/flow', #'E:/dataset/instruments_video/UCF-101/', #'preprocess/data/flow/24881317_23_part_6.npy',#v_BabyCrawling_g06_c05.npy',
-    # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
+   'rgb': '/data2/ye/data/rgb', #'./24881317_23_part_6_rgb.npy',
+   'flow': '/data2/ye/data/flow',#v_BabyCrawling_g06_c05.npy',
 }
 
 _CHECKPOINT_PATHS = {
@@ -64,13 +51,13 @@ _CHECKPOINT_PATHS = {
     'rgb_imagenet': 'data/checkpoints/rgb_imagenet/model.ckpt',
     'flow_imagenet': 'data/checkpoints/flow_imagenet/model.ckpt',
 }
-DATA_DIR = 'E:/dataset/instruments_video/Video_9k_dataset_v3/9k_test_video'#'/data1/csfu/test_video/9k_test_video'#'/data2/dataset/Video_9k_dataset_v3/video_9k'
+DATA_DIR = 'E:/dataset/instruments_video/Video_9k_dataset_v3/9k_test_video'
 rgb_model_path = 'kugou_rgb_0.902_model-56882'
 flow_model_path = 'preprocess/log-joint/kugou_flow_0.894_model-51624'
-_LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
+_LABEL_MAP_PATH = 'preprocess/label_kugou.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
 train_path = 'preprocess/video_9k_train_list_v2.txt'
-test_path = '/data1/csfu/test_video/9k_test_video'#'preprocess/video_9k_test_list_v2.txt'
+test_path = '/data1/csfu/test_video/9k_test_video'
 log_dir = 'preprocess/log'
 FLAGS = tf.flags.FLAGS
 
@@ -251,10 +238,6 @@ def main(unused_argv):
                 test_output.extend(list(np.argmax(test_flow_logits[i], axis=1)))
             # resultprint(test_label_flow, test_output)
         if eval_type == 'joint':
-            # flag = np.array(test_label_rgb) == np.array(test_label_flow)
-            # print(flag)
-            # sumx = np.sum(np.array(test_label_rgb) - np.array(test_label_flow))
-            # print(sumx)
             if np.all(np.array(test_label_rgb) == np.array(test_label_flow)):
                 logits = np.array(test_rgb_logits) + np.array(test_flow_logits)
                 test_label = test_label_flow
@@ -265,30 +248,30 @@ def main(unused_argv):
         print('Optimization Finished! Time total:%.2f, Per Video: %2f' %(duration, duration/len(test_output)))
 
 def resultprint(test_label,test_output):
-        print(test_label)
-        print(test_output)
-        accuracy_sklearn = accuracy_score(test_label, test_output)
-        precision = precision_score(test_label, test_output, average= 'macro')
-        recall = recall_score(test_label, test_output, average= 'macro')
-        F1 = f1_score(test_label, test_output, average= 'macro')
-        print('accuracy_sklearn: %.3f, precision: %.3f, recall: %.3f, F1: %.3f' %
-              (accuracy_sklearn, precision, recall, F1))
+    print(test_label)
+    print(test_output)
+    accuracy_sklearn = accuracy_score(test_label, test_output)
+    precision = precision_score(test_label, test_output, average= 'macro')
+    recall = recall_score(test_label, test_output, average= 'macro')
+    F1 = f1_score(test_label, test_output, average= 'macro')
+    print('accuracy_sklearn: %.3f, precision: %.3f, recall: %.3f, F1: %.3f' %
+          (accuracy_sklearn, precision, recall, F1))
 
 def split_data2(data_info):
-  f = open(data_info)
-  train_info = []
-  i = 0
-  for line in f.readlines():
+    f = open(data_info)
+    train_info = []
+    i = 0
+    for line in f.readlines():
         info = line.strip().split(',')
         train_info.append(info)
         i += 1
         if i > testnum-1:
             break
-  f.close()
-  return train_info
+    f.close()
+    return train_info
 
 if __name__ == '__main__':
-  tf.app.run(main)
+    tf.app.run(main)
     # main()
 
 # reader = tf.train.NewCheckpointReader('/data2/ye/instrument-detect/preprocess/log/kugou_flow_0.988_model-12096')

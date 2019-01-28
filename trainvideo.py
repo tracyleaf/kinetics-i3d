@@ -1,16 +1,8 @@
-# Copyright 2017 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# ============================================================================
+# 输入格式为已经过提取的光流或rgb的.npy文件
+# i3d网络，rgb和光流分别计算，再进行模型融合
+# 预加载模型为imagenet_pretrained和rgb_imagenet，
+# 未添加数据增强
 # ============================================================================
 # -*- coding: utf-8 -*-
 """Loads a sample video and classifies using a trained Kinetics checkpoint."""
@@ -26,7 +18,6 @@ import i3d
 import sonnet as snt
 import time
 from math import isnan
-
 from tensorflow.python import debug as tf_debug
 import os
 import logging
@@ -36,7 +27,7 @@ import cv2
 _IMAGE_SIZE = 224
 frameHeight = 224#480
 frameWidth = 224#640
-dropout_keep_prob = 0.8 #0.8
+dropout_keep_prob = 0.8
 batch_size = 16 #8
 epoch = 200
 _LEARNING_RATE = 0.01
@@ -49,10 +40,8 @@ rgb_or_flow = 'flow'
 _SAVER_MAX_TO_KEEP = 3
 _SAMPLE_VIDEO_FRAMES = 15
 _SAMPLE_PATHS = {
-    # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
-   'rgb': '/data2/ye/data/rgb',  #'E:/dataset/instruments_video/UCF-101/',  # '24881317_23_part_6.npy', #'./24881317_23_part_6_rgb.npy',
-   'flow': '/data2/ye/data/flow', #'E:/dataset/instruments_video/UCF-101/', #'preprocess/data/flow/24881317_23_part_6.npy',#v_BabyCrawling_g06_c05.npy',
-    # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
+   'rgb': '/data2/ye/data/rgb',
+   'flow': '/data2/ye/data/flow',
 }
 
 _CHECKPOINT_PATHS = {
@@ -63,7 +52,7 @@ _CHECKPOINT_PATHS = {
     'flow_imagenet': 'data/checkpoints/flow_imagenet/model.ckpt',
 }
 
-_LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
+_LABEL_MAP_PATH = 'preprocess/label_kugou.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
 train_path = 'preprocess/video_9k_train_list_v2.txt'
 test_path = 'preprocess/video_9k_test_list_v2.txt'
@@ -194,7 +183,6 @@ def main(unused_argv):
         flow_variable_map = [v for v in tf.global_variables() if 'Logits_ye' not in v.name]
         flow_saver = tf.train.Saver(var_list=flow_variable_map, reshape=True)
 
-    saver2 = tf.train.Saver(max_to_keep=_SAVER_MAX_TO_KEEP)
     if eval_type == 'rgb':
         fc_out = rgb_logits
     elif eval_type == 'flow':
@@ -224,13 +212,13 @@ def main(unused_argv):
     #                                            _MOMENTUM).minimize(cost, var_list=varlist, global_step=global_step)
     # max_gradient_norm = 5
     init = tf.global_variables_initializer()
+    saver2 = tf.train.Saver(max_to_keep=_SAVER_MAX_TO_KEEP)
     with tf.Session() as sess:
         sess.run(init)
         sess.run(train_init_op)
         # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
         # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
         # print(sess.run(variable1))
-        feed_dict = {}
         if eval_type in ['rgb', 'rgb600', 'joint']:
             if imagenet_pretrained:
                 rgb_saver.restore(sess, _CHECKPOINT_PATHS['rgb_imagenet'])
@@ -259,7 +247,6 @@ def main(unused_argv):
             _, out_logits, out_predictions, cost1, is_in_top_1, input, label, learning_rate_c  \
                 = sess.run([optimizer,fc_out, model_predictions,cost, is_in_top_1_op, clip_holder, label_holder, learning_rate],
                                                              feed_dict={dropout_holder: dropout_keep_prob, is_train_holder: True})#False
-            # learning_rate_c = 0.1
             tmp = np.sum(is_in_top_1)
             tmp_count = tmp
             true_count += tmp
@@ -274,7 +261,7 @@ def main(unused_argv):
                   % (duration, count, step % batch_num, batch_num-1,learning_rate_c, cost1, accuracy))
             logging.info("(%.2f sec/batch) epoch:%d, step:%d/%d, learning_rate:%f, loss: %-.4f, accuracy: %.3f "
                   % (duration, count, step % batch_num, batch_num-1,learning_rate_c, cost1, accuracy))
-            if step % batch_num == 0:#batch_num
+            if step % batch_num == 0:
                 accuracy = true_count / (batch_num * batch_size)
                 print('Epoch%d, train accuracy: %.3f' %
                       (count, accuracy))
@@ -287,15 +274,6 @@ def main(unused_argv):
                 step_test = 0
                 if accuracy > 0.1:
                     sess.run(test_init_op) # new iterator
-                    # start test process
-                    # for i in range(len(testpathlist)): # test batch is 1
-                    #     is_in_top_1,test_predictions,label = sess.run([is_in_top_1_op,model_predictions,label_holder],
-                    #                            feed_dict={dropout_holder: 1,
-                    #                                       is_train_holder: False })#True
-                    #     test_count += np.sum(is_in_top_1)
-                    #     test_output.append(np.argmax(test_predictions, axis=1))
-                    #     test_label.append(label)
-                    #  accuracy = test_count / len(testpathlist)
                     test_batch_num = int(np.ceil(len(testpathlist)/batch_size))#最后一个batch的数目不满一个batch_size
                     while step_test < test_batch_num:
                         step_test += 1
@@ -311,12 +289,6 @@ def main(unused_argv):
                         accuracy = test_count /len(testpathlist)
                     # to ensure every test procedure has the same test size
                     # test_data.index_in_epoch = 0
-                    # test_predictions, is_in_top_1, input, label \
-                    #             = sess.run([model_predictions,is_in_top_1_op, clip_holder, label_holder],
-                    #         feed_dict={dropout_holder: 1, is_train_holder: False})  # False
-                    # test_label.extend(label)
-                    # test_output.extend(np.argmax(test_predictions, axis=1))
-                    # accuracy = np.sum(is_in_top_1)/batch_size
                     accuracy_sklearn = accuracy_score(test_label, test_output)
                     precision = precision_score(test_label, test_output, average= 'macro')
                     recall = recall_score(test_label, test_output, average= 'macro')
@@ -342,6 +314,9 @@ def main(unused_argv):
 
 
 def batch2array(pathlist, rgb_or_flow):
+    """
+        load file格式为.npy格式
+    """
     pathdir = _SAMPLE_PATHS[rgb_or_flow.decode("utf-8")]
     path = str(pathlist[0])[2:-1]
     videolabel = int(str(pathlist[1])[2:-1])
@@ -350,12 +325,18 @@ def batch2array(pathlist, rgb_or_flow):
     return array, videolabel
 
 def _get_data_label_from_info(train_info_tensor, rgb_or_flow):
-    """ Wrapper for `tf.py_func`, get video clip and label from info list."""
+    """
+    :param train_info_tensor: train_info_tensor对应的单个数据包含input and label
+    :return: 输入网络的array, label数据
+    """
     clip_holder,label_holder = tf.py_func(
         batch2array, [train_info_tensor, rgb_or_flow], [tf.float32, tf.int64]) #train_info_tensor contains input and label
     return clip_holder, label_holder
 
 def split_data(data_info):
+    """
+    :return: 单个data_info，格式为[filename,label]
+    """
     f = open(data_info)
     train_info = list()
     for line in f.readlines():

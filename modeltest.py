@@ -1,16 +1,6 @@
-# Copyright 2017 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# ============================================================================
+# 加载数据测试，队列方式，设置rgb_or_flow 为 'flow'或'rgb'类型
+# 输入数据为.npy格式
 # ============================================================================
 # -*- coding: utf-8 -*-
 """Loads a sample video and classifies using a trained Kinetics checkpoint."""
@@ -45,15 +35,13 @@ flag = False
 _NUM_PARALLEL_CALLS = 10
 _PREFETCH_BUFFER_SIZE = 30
 _MOMENTUM = 0.9
-rgb_or_flow = 'joint'
+rgb_or_flow = 'flow'
 
 _SAVER_MAX_TO_KEEP = 10
 _SAMPLE_VIDEO_FRAMES = 15
 _SAMPLE_PATHS = {
-    # 'rgb': 'data/v_CricketShot_g04_c01_rgb.npy',
-   'rgb': '/data2/ye/data/rgb',  #'E:/dataset/instruments_video/UCF-101/',  # '24881317_23_part_6.npy', #'./24881317_23_part_6_rgb.npy',
-   'flow': '/data2/ye/data/flow', #'E:/dataset/instruments_video/UCF-101/', #'preprocess/data/flow/24881317_23_part_6.npy',#v_BabyCrawling_g06_c05.npy',
-    # 'flow': 'data/v_CricketShot_g04_c01_flow.npy',
+   'rgb': '/data2/ye/data/rgb',
+   'flow': '/data2/ye/data/flow',
 }
 
 _CHECKPOINT_PATHS = {
@@ -64,10 +52,12 @@ _CHECKPOINT_PATHS = {
     'flow_imagenet': 'data/checkpoints/flow_imagenet/model.ckpt',
 }
 
-_LABEL_MAP_PATH = 'preprocess/label_kugou.txt'  #'data/label_map.txt'
+_LABEL_MAP_PATH = 'preprocess/label_kugou.txt'
 _LABEL_MAP_PATH_600 = 'data/label_map_600.txt'
-train_path = 'preprocess/video_8k_train_list_v3.txt'
-test_path = 'preprocess/video_8k_test_list_v3.txt'
+train_path = 'preprocess/video_9k_train_list_v2.txt'
+test_path = 'preprocess/video_9k_test_list_v2.txt'
+rgb_model_path = '/data2/ye/instrument-detect/preprocess/log-joint/kugou_rgb_0.902_model-56882'
+flow_model_path = '/data2/ye/instrument-detect/preprocess/log-joint/kugou_flow_0.894_model-51624'
 log_dir = 'preprocess/log'
 FLAGS = tf.flags.FLAGS
 
@@ -86,16 +76,17 @@ _SCOPE = {
 _CLASS_NUM = {
     'ucf101': 101,
     'hmdb51': 51,
-    'kugou': 9
+    'kugou': 15
 }
 
 def main(unused_argv):
 # def main(dataset='kugou'):
     tf.logging.set_verbosity(tf.logging.INFO)
+    time1 = time.time()
     eval_type = FLAGS.eval_type
 
     imagenet_pretrained = FLAGS.imagenet_pretrained
-    NUM_CLASSES = 9  # 400
+    NUM_CLASSES = 15  # 400
     if eval_type == 'rgb600':
         NUM_CLASSES = 600
 
@@ -125,25 +116,6 @@ def main(unused_argv):
     dropout_holder = tf.placeholder(tf.float32)
     is_train_holder = tf.placeholder(tf.bool)
     test_info_dataset = tf.data.Dataset.from_tensor_slices(test_info_tensor)
-    # if eval_type in ['rgb','flow']:
-    #     # one element in this dataset is (single image_postprocess, single label)
-    #     test_dataset = test_info_dataset.map(lambda x: _get_data_label_from_info(
-    #         x, eval_type), num_parallel_calls=_NUM_PARALLEL_CALLS)
-    #     # one element in this dataset is (batch image_postprocess, batch label)
-    #     test_dataset = test_dataset.batch(batch_size).repeat() #1
-    #     test_dataset = test_dataset.prefetch(buffer_size=_PREFETCH_BUFFER_SIZE)
-    #
-    #     iterator = tf.data.Iterator.from_structure(
-    #         test_dataset.output_types, test_dataset.output_shapes)
-    #     test_init_op = iterator.make_initializer(test_dataset)
-    #
-    #     clip_holder, label_holder = iterator.get_next()
-    #     clip_holder = tf.squeeze(clip_holder,  [1])
-    #     # label_holder = tf.squeeze(label_holder, [1])
-    #     clip_holder.set_shape(
-    #         [None, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, _CHANNEL[eval_type]])
-
-    # if eval_type == 'joint':
     test_dataset_rgb = test_info_dataset.map(lambda x: _get_data_label_from_info(
         x, 'rgb'), num_parallel_calls=_NUM_PARALLEL_CALLS)
     # one element in this dataset is (batch image_postprocess, batch label)
@@ -198,7 +170,7 @@ def main(unused_argv):
                 rgb_logits = tf.squeeze(logits, [2, 3], name='SpatialSqueeze')
                 rgb_logits = tf.reduce_mean(rgb_logits, axis=1)
             # rgb_variable_map = [v for v in tf.global_variables() if 'Logits_ye_rgb' not in v.name]
-            rgb_saver = tf.train.Saver(var_list=[i for i in tf.global_variables() if 'RGB' in i.name])
+        rgb_saver = tf.train.Saver(var_list=[i for i in tf.global_variables() if 'RGB' in i.name])
             # is_in_top_1_op_flow = tf.nn.in_top_k(fc_out, label_holder_flow, 1)
 
     if eval_type in ['flow', 'joint']:
@@ -236,13 +208,14 @@ def main(unused_argv):
     # model_predictions = tf.nn.softmax(model_logits)
 
     init = tf.global_variables_initializer()
+
     with tf.Session() as sess:
         sess.run(init)
         if eval_type in ['rgb', 'joint']:
-            rgb_saver.restore(sess, '/data2/ye/instrument-detect/preprocess/log/kugou_rgb_0.879_model-41216')#kugou_rgb_0.875_model-34944 kugou_flow_0.866_model-41664  kugou_rgb_0.869_model-30912
+            rgb_saver.restore(sess, rgb_model_path)#kugou_rgb_0.875_model-34944 kugou_flow_0.866_model-41664  kugou_rgb_0.869_model-30912
             tf.logging.info('RGB checkpoint restored')
         if eval_type in ['flow', 'joint']:
-            flow_saver.restore(sess, '/data2/ye/instrument-detect/preprocess/log/kugou_flow_0.873_model-81088') #_CHECKPOINT_PATHS['flow']
+            flow_saver.restore(sess, flow_model_path) #_CHECKPOINT_PATHS['flow']kugou_flow_0.873_model-81088
             tf.logging.info('Flow checkpoint restored')
 
         test_label_rgb = []
@@ -287,7 +260,8 @@ def main(unused_argv):
                 test_output = list(np.argmax(logits, axis=1))
                 resultprint(test_label, test_output)
         sess.close()
-        print("Optimization Finished!")
+        duration = time.time() - time1
+        print("Optimization Finished! Time total:%.2f, Per Video: %2f" %(duration, duration/len(testpathlist)))
 
 def resultprint(test_label,test_output):
         print(test_label)
@@ -327,7 +301,7 @@ if __name__ == '__main__':
   tf.app.run(main)
     # main()
 
-reader = tf.train.NewCheckpointReader('/data2/ye/instrument-detect/preprocess/log/kugou_flow_0.988_model-12096')
-varibles = reader.get_variable_to_shape_map()
-for i in varibles:
-    print(i)
+# reader = tf.train.NewCheckpointReader('/data2/ye/instrument-detect/preprocess/log/kugou_flow_0.988_model-12096')
+# varibles = reader.get_variable_to_shape_map()
+# for i in varibles:
+#     print(i)
